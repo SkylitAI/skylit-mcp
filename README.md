@@ -60,6 +60,19 @@ Skylit().gex_levels("SPY")   # reads SKYLIT_API_KEY
 
 Source and docs: [packages/python](packages/python).
 
+## TypeScript
+
+```bash
+npm install skylit
+```
+
+```ts
+import { Skylit } from "skylit";
+await new Skylit().gexLevels("SPY");   // reads SKYLIT_API_KEY
+```
+
+Source and docs: [packages/typescript](packages/typescript). (The npm release follows shortly.)
+
 ## Clients
 
 | Client | Sign in with Skylit | API key | Guide |
