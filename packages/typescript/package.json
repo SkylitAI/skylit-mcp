@@ -1,6 +1,6 @@
 {
   "name": "@skylitai/sdk",
-  "version": "0.1.0",
+  "version": "0.1.1",
   "description": "TypeScript client for Skylit market data: options flow, volatility, dealer positioning (GEX) and dark pool, for AI trading agents.",
   "license": "MIT",
   "author": "Skylit, Inc. <support@skylit.ai>",

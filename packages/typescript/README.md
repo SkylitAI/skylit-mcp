@@ -31,3 +31,7 @@ For Claude, ChatGPT, Cursor, the Vercel AI SDK, the OpenAI Agents SDK and other 
 ## Pricing and terms
 
 Calls are billed in credits (1 credit = $0.001; most calls cost 1 to 5). See [the docs](https://www.skylit.ai/docs). Use of Skylit data is governed by the [API Terms](https://www.skylit.ai/api-terms), which cover personal and research use; for commercial use, contact support@skylit.ai. The MIT license covers this client's code, not Skylit data.
+
+## Staying current
+
+This client and [its repo](https://github.com/SkylitAI/skylit-mcp) are checked against the live API every 6 hours; new releases follow API changes.
