@@ -1,0 +1,12 @@
+{
+  "name": "skylit",
+  "version": "0.1.0",
+  "description": "Read-only US options market data from Skylit: options flow, dealer gamma levels, dark pool, implied volatility.",
+  "contextFileName": "GEMINI.md",
+  "mcpServers": {
+    "skylit": {
+      "description": "Skylit market data (sign in with Skylit on first use).",
+      "httpUrl": "https://mcp.skylit.ai/mcp"
+    }
+  }
+}

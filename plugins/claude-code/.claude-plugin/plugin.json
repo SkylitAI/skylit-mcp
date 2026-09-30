@@ -1,0 +1,13 @@
+{
+  "name": "skylit",
+  "displayName": "Skylit",
+  "version": "0.1.0",
+  "description": "Read-only US options market data from Skylit over MCP: options flow, dealer gamma/vanna levels and heatmaps with point-in-time replay, dark pool prints, and the Tempest volatility suite.",
+  "author": {
+    "name": "Skylit",
+    "email": "support@skylit.ai",
+    "url": "https://www.skylit.ai"
+  },
+  "homepage": "https://www.skylit.ai/docs/mcp/overview",
+  "keywords": ["mcp", "options", "market-data", "gex", "volatility"]
+}

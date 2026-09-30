@@ -1,0 +1,18 @@
+{
+  "name": "skylit",
+  "description": "Skylit plugins for Claude Code: read-only US options market data over MCP.",
+  "owner": {
+    "name": "Skylit",
+    "email": "support@skylit.ai",
+    "url": "https://www.skylit.ai"
+  },
+  "plugins": [
+    {
+      "name": "skylit",
+      "source": "./plugins/claude-code",
+      "description": "Connects the Skylit MCP server (options flow, dealer gamma levels, dark pool, implied volatility) and adds a skill on how to use it.",
+      "category": "data",
+      "tags": ["mcp", "market-data", "options"]
+    }
+  ]
+}

@@ -1,0 +1,22 @@
+{
+  "$schema": "https://static.modelcontextprotocol.io/schemas/2025-12-11/server.schema.json",
+  "name": "ai.skylit/mcp",
+  "title": "Skylit",
+  "description": "Read-only US options market data: options flow, dealer gamma levels, dark pool, implied volatility.",
+  "version": "0.1.0",
+  "websiteUrl": "https://www.skylit.ai/docs/mcp/overview",
+  "remotes": [
+    {
+      "type": "streamable-http",
+      "url": "https://mcp.skylit.ai/mcp",
+      "headers": [
+        {
+          "name": "Authorization",
+          "description": "Optional. 'Bearer <Skylit API key>' from https://app.skylit.ai/developer. Omit to sign in with Skylit (OAuth).",
+          "isRequired": false,
+          "isSecret": true
+        }
+      ]
+    }
+  ]
+}
