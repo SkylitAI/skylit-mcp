@@ -1,0 +1,33 @@
+[build-system]
+requires = ["hatchling>=1.25"]
+build-backend = "hatchling.build"
+
+[project]
+name = "skylit"
+version = "0.1.0"
+description = "Python client for Skylit market data: options flow, volatility, dealer positioning (GEX) and dark pool, for AI trading agents."
+readme = "README.md"
+requires-python = ">=3.9"
+license = "MIT"
+license-files = ["LICENSE"]
+authors = [{ name = "Skylit, Inc.", email = "support@skylit.ai" }]
+keywords = ["skylit", "options", "options-flow", "gamma-exposure", "gex", "volatility", "dark-pool", "mcp", "ai-agents", "trading"]
+classifiers = [
+  "Development Status :: 3 - Alpha",
+  "Intended Audience :: Developers",
+  "Intended Audience :: Financial and Insurance Industry",
+  "Operating System :: OS Independent",
+  "Programming Language :: Python :: 3",
+  "Topic :: Office/Business :: Financial :: Investment",
+  "Typing :: Typed",
+]
+dependencies = []
+
+[project.urls]
+Homepage = "https://www.skylit.ai"
+Documentation = "https://www.skylit.ai/docs"
+Source = "https://github.com/SkylitAI/skylit-mcp/tree/main/packages/python"
+Issues = "https://github.com/SkylitAI/skylit-mcp/issues"
+
+[tool.hatch.build.targets.wheel]
+packages = ["src/skylit"]

@@ -47,6 +47,19 @@ clients (`url`, `httpUrl`, `serverUrl`, `servers`), so check your client below.
 
 Then ask: *"What are the key gamma levels and today's flow tone for SPY?"*
 
+## Python
+
+```bash
+pip install skylit
+```
+
+```python
+from skylit import Skylit
+Skylit().gex_levels("SPY")   # reads SKYLIT_API_KEY
+```
+
+Source and docs: [packages/python](packages/python).
+
 ## Clients
 
 | Client | Sign in with Skylit | API key | Guide |
