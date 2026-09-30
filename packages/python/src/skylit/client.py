@@ -9,6 +9,7 @@ import urllib.parse
 import urllib.request
 from typing import Any, Iterable, Mapping, Optional, Union
 
+_VERSION = "0.1.1"
 API_URL = "https://api.skylit.ai"
 MCP_URL = "https://mcp.skylit.ai/mcp"
 
@@ -72,7 +73,7 @@ class Skylit:
             headers={
                 "Authorization": f"Bearer {self._key}",
                 "Accept": "application/json",
-                "User-Agent": "skylit-python/0.1.0",
+                "User-Agent": f"skylit-python/{_VERSION}",
             },
         )
         try:
