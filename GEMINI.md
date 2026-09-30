@@ -26,4 +26,4 @@ free). Pick the narrowest tool that answers the question:
 Outside market hours, data reflects the last session. Data is licensed for the
 user's own research; don't present it as investment advice.
 
-Tool catalog with credit costs: https://www.skylit.ai/docs/mcp/tools
+Tool catalog with credit costs: https://www.skylit.ai/docs/mcp/tools?utm_source=github&utm_medium=developer&utm_campaign=api_distribution&utm_content=gemini

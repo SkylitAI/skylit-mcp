@@ -12,7 +12,7 @@ Gemini CLI extension, an agent skill, and runnable examples. It contains no
 server code; the server is hosted by Skylit.
 
 > **Status: beta.** The API and MCP server are open to Skylit members with API
-> access. Check yours on the [Developer page](https://app.skylit.ai/developer).
+> access. Check yours on the [Developer page](https://app.skylit.ai/developer?utm_source=github&utm_medium=developer&utm_campaign=api_distribution&utm_content=readme).
 
 ## Quick connect
 
@@ -20,7 +20,7 @@ server code; the server is hosted by Skylit.
 | --- | --- |
 | **URL** | `https://mcp.skylit.ai/mcp` |
 | **Transport** | Streamable HTTP |
-| **Auth** | Sign in with Skylit (OAuth): add the URL and approve on the Skylit page. Or send `Authorization: Bearer <API key>` with a key from the [Developer page](https://app.skylit.ai/developer). |
+| **Auth** | Sign in with Skylit (OAuth): add the URL and approve on the Skylit page. Or send `Authorization: Bearer <API key>` with a key from the [Developer page](https://app.skylit.ai/developer?utm_source=github&utm_medium=developer&utm_campaign=api_distribution&utm_content=readme). |
 
 Claude Code:
 
@@ -105,7 +105,7 @@ of 2026-09-30. Guides mark anything we could not confirm.
 ## Tools
 
 <!-- sync:tools:start -->
-63 tools, all read-only. Each wraps one Skylit REST endpoint with the same credit cost. Full catalog with arguments and prices: [www.skylit.ai/docs/mcp/tools](https://www.skylit.ai/docs/mcp/tools); machine-readable copy: [reference/tools.json](reference/tools.json).
+63 tools, all read-only. Each wraps one Skylit REST endpoint with the same credit cost. Full catalog with arguments and prices: [www.skylit.ai/docs/mcp/tools](https://www.skylit.ai/docs/mcp/tools?utm_source=github&utm_medium=developer&utm_campaign=api_distribution&utm_content=readme); machine-readable copy: [reference/tools.json](reference/tools.json).
 
 | Group | Tools |
 | --- | --- |
@@ -133,8 +133,8 @@ at no charge. OHLCV price bars (Atlas) are available over REST, not MCP.
 - **Failed calls are free**: any `4xx` or `5xx` is refunded.
 - **`account_usage` is free** and returns your balance and limits. Each tool
   result's `meta` includes the remaining balance.
-- Per-tool costs: [tool catalog](https://www.skylit.ai/docs/mcp/tools).
-  Plans and included credits: [www.skylit.ai/pricing](https://www.skylit.ai/pricing).
+- Per-tool costs: [tool catalog](https://www.skylit.ai/docs/mcp/tools?utm_source=github&utm_medium=developer&utm_campaign=api_distribution&utm_content=readme).
+  Plans and included credits: [www.skylit.ai/pricing](https://www.skylit.ai/pricing?utm_source=github&utm_medium=developer&utm_campaign=api_distribution&utm_content=readme).
 
 ## REST API
 
@@ -148,7 +148,7 @@ OpenAPI spec at `/v1/openapi.json`:
 | `https://atlas-api.skylit.ai` | OHLCV price bars (Atlas) |
 
 See [examples/python/rest-quickstart](examples/python/rest-quickstart) and the
-[API reference](https://www.skylit.ai/docs/api-reference/introduction).
+[API reference](https://www.skylit.ai/docs/api-reference/introduction?utm_source=github&utm_medium=developer&utm_campaign=api_distribution&utm_content=readme).
 
 ## What's in this repo
 
@@ -169,7 +169,7 @@ execution is left to your own broker.
 
 - **This repository** (code and docs) is MIT licensed. See [LICENSE](LICENSE)
   and [NOTICE](NOTICE). The license does not cover Skylit data.
-- **Skylit data** is governed by the [API Terms](https://www.skylit.ai/api-terms).
+- **Skylit data** is governed by the [API Terms](https://www.skylit.ai/api-terms?utm_source=github&utm_medium=developer&utm_campaign=api_distribution&utm_content=readme).
   Keys are personal. Using data for your own trading, research and education,
   including private agents that act for you, is covered. Commercial use,
   redistribution and republishing bulk data need a written license: contact
@@ -178,12 +178,12 @@ execution is left to your own broker.
 
 ## Links
 
-- Docs: [www.skylit.ai/docs](https://www.skylit.ai/docs)
-  ([MCP overview](https://www.skylit.ai/docs/mcp/overview),
-  [quickstart](https://www.skylit.ai/docs/mcp/quickstart),
-  [example prompts](https://www.skylit.ai/docs/mcp/examples))
+- Docs: [www.skylit.ai/docs](https://www.skylit.ai/docs?utm_source=github&utm_medium=developer&utm_campaign=api_distribution&utm_content=readme)
+  ([MCP overview](https://www.skylit.ai/docs/mcp/overview?utm_source=github&utm_medium=developer&utm_campaign=api_distribution&utm_content=readme),
+  [quickstart](https://www.skylit.ai/docs/mcp/quickstart?utm_source=github&utm_medium=developer&utm_campaign=api_distribution&utm_content=readme),
+  [example prompts](https://www.skylit.ai/docs/mcp/examples?utm_source=github&utm_medium=developer&utm_campaign=api_distribution&utm_content=readme))
 - Full agent reference (REST, streams, MCP): [www.skylit.ai/docs/skill.md](https://www.skylit.ai/docs/skill.md)
-- API keys: [app.skylit.ai/developer](https://app.skylit.ai/developer)
+- API keys: [app.skylit.ai/developer](https://app.skylit.ai/developer?utm_source=github&utm_medium=developer&utm_campaign=api_distribution&utm_content=readme)
 - Support: [support@skylit.ai](mailto:support@skylit.ai)
 - Security: [SECURITY.md](SECURITY.md)
-- Legal: [Terms](https://www.skylit.ai/terms), [Privacy](https://www.skylit.ai/privacy), [API Terms](https://www.skylit.ai/api-terms)
+- Legal: [Terms](https://www.skylit.ai/terms?utm_source=github&utm_medium=developer&utm_campaign=api_distribution&utm_content=readme), [Privacy](https://www.skylit.ai/privacy?utm_source=github&utm_medium=developer&utm_campaign=api_distribution&utm_content=readme), [API Terms](https://www.skylit.ai/api-terms?utm_source=github&utm_medium=developer&utm_campaign=api_distribution&utm_content=readme)

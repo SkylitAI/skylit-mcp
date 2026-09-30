@@ -9,7 +9,7 @@ import urllib.parse
 import urllib.request
 from typing import Any, Iterable, Mapping, Optional, Union
 
-_VERSION = "0.1.1"
+_VERSION = "0.1.2"
 API_URL = "https://api.skylit.ai"
 MCP_URL = "https://mcp.skylit.ai/mcp"
 

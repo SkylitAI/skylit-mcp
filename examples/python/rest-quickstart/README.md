@@ -18,7 +18,7 @@ your own broker.
 python -m venv .venv && source .venv/bin/activate
 pip install -r requirements.txt
 
-export SKYLIT_API_KEY="..."     # https://app.skylit.ai/developer
+export SKYLIT_API_KEY="..."     # https://app.skylit.ai/developer?utm_source=github&utm_medium=developer&utm_campaign=api_distribution&utm_content=examples-python-rest-quickstart-readme
 python main.py SPY
 ```
 

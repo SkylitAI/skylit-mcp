@@ -1,10 +1,10 @@
 {
   "name": "@skylitai/sdk",
-  "version": "0.1.1",
+  "version": "0.1.2",
   "description": "TypeScript client for Skylit market data: options flow, volatility, dealer positioning (GEX) and dark pool, for AI trading agents.",
   "license": "MIT",
   "author": "Skylit, Inc. <support@skylit.ai>",
-  "homepage": "https://www.skylit.ai/docs",
+  "homepage": "https://www.skylit.ai/docs?utm_source=npm&utm_medium=developer&utm_campaign=api_distribution&utm_content=packages-typescript-package",
   "repository": {
     "type": "git",
     "url": "git+https://github.com/SkylitAI/skylit-mcp.git",

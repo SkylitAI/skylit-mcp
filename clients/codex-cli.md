@@ -12,7 +12,7 @@ bearer_token_env_var = "SKYLIT_API_KEY"
 ```
 
 ```bash
-export SKYLIT_API_KEY="..."   # from https://app.skylit.ai/developer
+export SKYLIT_API_KEY="..."   # from https://app.skylit.ai/developer?utm_source=github&utm_medium=developer&utm_campaign=api_distribution&utm_content=clients-codex-cli
 codex
 ```
 

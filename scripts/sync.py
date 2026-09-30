@@ -17,6 +17,7 @@ from __future__ import annotations
 import json
 import re
 import sys
+import urllib.parse
 import urllib.request
 from pathlib import Path
 
@@ -33,6 +34,60 @@ CHECKED = ["README.md", "GEMINI.md", "llms-install.md", "skills", "plugins", "ex
 TOOL_PREFIXES = ("heat_", "tempest_", "flow_", "dark_pool_", "top_", "unusual_", "underlying_",
                  "contract_", "market_", "chain_", "list_active_", "account_", "trade_", "sector_")
 START, END = "<!-- sync:tools:start -->", "<!-- sync:tools:end -->"
+
+# Every human-facing skylit.ai link carries UTMs so visits, signups and
+# free-to-paid conversions from each surface are attributable.
+# Machine-read files (specs, llms.txt, skill.md) are left untagged.
+SITE_LINK = re.compile(r"https://(?:www\.|app\.)?skylit\.ai(?:[/?][^\s)\"'<>`\]]*)?")
+UTM_FILES = (".md", ".json", ".toml")
+UTM_SKIP_EXT = (".yaml", ".yml", ".json", ".txt", ".md")
+
+
+def utm_source(rel: Path) -> str:
+    parts = rel.parts
+    if parts[:2] == ("packages", "python"):
+        return "pypi"
+    if parts[:2] == ("packages", "typescript"):
+        return "npm"
+    if rel.name == "server.json":
+        return "mcp_registry"
+    return "github"
+
+
+def tag_url(url: str, rel: Path) -> str:
+    trail = ""
+    while url and url[-1] in ".,;:":
+        trail, url = url[-1] + trail, url[:-1]
+    parts = urllib.parse.urlsplit(url)
+    if not parts.path:
+        parts = parts._replace(path="/")
+    if parts.path.lower().endswith(UTM_SKIP_EXT):
+        return url + trail
+    query = [(k, v) for k, v in urllib.parse.parse_qsl(parts.query) if not k.startswith("utm_")]
+    slug = re.sub(r"[^a-z0-9]+", "-", str(rel.with_suffix("")).lower()).strip("-")
+    query += [("utm_source", utm_source(rel)), ("utm_medium", "developer"),
+              ("utm_campaign", "api_distribution"), ("utm_content", slug)]
+    return urllib.parse.urlunsplit(parts._replace(query=urllib.parse.urlencode(query))) + trail
+
+
+def utm_files():
+    for f in sorted(ROOT.rglob("*")):
+        rel = f.relative_to(ROOT)
+        if f.is_file() and f.suffix in UTM_FILES and not set(rel.parts) & {"reference", "node_modules", ".git", "dist"} \
+                and f.name != "package-lock.json":
+            yield f, rel
+
+
+def tag_links(write: bool) -> list[str]:
+    untagged = []
+    for f, rel in utm_files():
+        text = f.read_text(encoding="utf-8")
+        new = SITE_LINK.sub(lambda m: tag_url(m.group(0), rel), text)
+        if new != text:
+            untagged.append(f"{rel}: skylit.ai link without the standard UTMs")
+            if write:
+                f.write_text(new, encoding="utf-8")
+    return untagged
 
 
 def fetch(url: str) -> str:
@@ -143,7 +198,8 @@ def main() -> int:
             (ROOT / "README.md").write_text(readme, encoding="utf-8")
         print(f"synced: {len(tools)} tools, {len(paths)} REST paths")
 
-    problems = check(tools, paths)
+    utm_missing = tag_links(write=not only_check)
+    problems = check(tools, paths) + (utm_missing if only_check else [])
     for p in problems:
         print(f"DRIFT {p}")
     return 1 if problems else 0

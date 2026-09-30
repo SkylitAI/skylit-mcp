@@ -32,7 +32,7 @@ the file:
     {
       "type": "promptString",
       "id": "skylit-api-key",
-      "description": "Skylit API key (https://app.skylit.ai/developer)",
+      "description": "Skylit API key (https://app.skylit.ai/developer?utm_source=github&utm_medium=developer&utm_campaign=api_distribution&utm_content=clients-vscode)",
       "password": true
     }
   ],

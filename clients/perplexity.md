@@ -8,7 +8,7 @@ Custom remote connectors are available on Pro, Max and Enterprise.
 2. Name: `Skylit`. MCP Server URL: `https://mcp.skylit.ai/mcp`.
 3. Transport: **Streamable HTTP**.
 4. Authentication: **OAuth** (sign in with Skylit), or **API Key** with a key
-   from the [Developer page](https://app.skylit.ai/developer).
+   from the [Developer page](https://app.skylit.ai/developer?utm_source=github&utm_medium=developer&utm_campaign=api_distribution&utm_content=clients-perplexity).
 5. Accept the acknowledgement, click **Add**, then open the connector card to
    authenticate.
 

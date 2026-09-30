@@ -5,7 +5,7 @@
 | URL | `https://mcp.skylit.ai/mcp` |
 | Transport | Streamable HTTP (JSON-RPC over `POST`; responses may be `text/event-stream`) |
 | Auth, option 1 | Sign in with Skylit (OAuth 2.1 with PKCE; discovery from the `401` `WWW-Authenticate` header; Client ID Metadata Documents and dynamic client registration both supported) |
-| Auth, option 2 | `Authorization: Bearer <API key>` from https://app.skylit.ai/developer |
+| Auth, option 2 | `Authorization: Bearer <API key>` from https://app.skylit.ai/developer?utm_source=github&utm_medium=developer&utm_campaign=api_distribution&utm_content=clients-generic |
 
 The server is stateless: there is no `Mcp-Session-Id`, so every request carries
 its own credential. The key must be in the `Authorization` header; `X-API-Key`
@@ -71,4 +71,4 @@ account.
 Sources, checked 2026-09-30:
 - https://github.com/geelen/mcp-remote
 - https://github.com/modelcontextprotocol/inspector
-- https://www.skylit.ai/docs/mcp/quickstart
+- https://www.skylit.ai/docs/mcp/quickstart?utm_source=github&utm_medium=developer&utm_campaign=api_distribution&utm_content=clients-generic

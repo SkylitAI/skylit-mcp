@@ -26,7 +26,7 @@ connection fails.
 ```
 
 This file holds the key in plain text. Keep it out of version control and
-revoke the key on the [Developer page](https://app.skylit.ai/developer) if it
+revoke the key on the [Developer page](https://app.skylit.ai/developer?utm_source=github&utm_medium=developer&utm_campaign=api_distribution&utm_content=clients-cline) if it
 leaks.
 
 ## Sign in with Skylit

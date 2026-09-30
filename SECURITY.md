@@ -13,7 +13,7 @@ or `app.skylit.ai` are also welcome at the same address.
 
 ## If you leaked an API key
 
-1. Revoke it on the [Developer page](https://app.skylit.ai/developer) right away.
+1. Revoke it on the [Developer page](https://app.skylit.ai/developer?utm_source=github&utm_medium=developer&utm_campaign=api_distribution&utm_content=security) right away.
 2. Create a new key and store it in an environment variable or a secret manager.
 3. Remove the key from any file, commit history or chat where it appeared.
 

@@ -16,5 +16,5 @@ All examples are read-only: they fetch data and never place orders. Order
 execution is left to your own broker.
 
 Each run spends a few Skylit credits (1 credit = $0.001; failed calls are free).
-Use your own key: under the [API Terms](https://www.skylit.ai/api-terms),
+Use your own key: under the [API Terms](https://www.skylit.ai/api-terms?utm_source=github&utm_medium=developer&utm_campaign=api_distribution&utm_content=examples-readme),
 keys are personal and must not be built into software other people use.

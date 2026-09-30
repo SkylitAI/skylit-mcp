@@ -6,13 +6,13 @@ locally.
 - URL: `https://mcp.skylit.ai/mcp`
 - Transport: streamable HTTP
 - Auth: `Authorization: Bearer <API key>`. The user creates a key at
-  https://app.skylit.ai/developer. Clients that support MCP OAuth can omit the
+  https://app.skylit.ai/developer?utm_source=github&utm_medium=developer&utm_campaign=api_distribution&utm_content=llms-install. Clients that support MCP OAuth can omit the
   header and let the user sign in with Skylit instead.
 
 ## Steps
 
 1. Ask the user for their Skylit API key, or ask them to create one at
-   https://app.skylit.ai/developer. Never invent, log or commit a key.
+   https://app.skylit.ai/developer?utm_source=github&utm_medium=developer&utm_campaign=api_distribution&utm_content=llms-install. Never invent, log or commit a key.
 2. Add this entry to the MCP settings file (for Cline, `cline_mcp_settings.json`):
 
    ```json
@@ -41,4 +41,4 @@ locally.
 - `403`: the key is recognized but API access isn't active on the account.
 - `402`: out of credits. The user can check the balance on the Developer page.
 
-All tools are read-only. Tool catalog: https://www.skylit.ai/docs/mcp/tools
+All tools are read-only. Tool catalog: https://www.skylit.ai/docs/mcp/tools?utm_source=github&utm_medium=developer&utm_campaign=api_distribution&utm_content=llms-install

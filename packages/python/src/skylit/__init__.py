@@ -13,4 +13,4 @@ Read-only: the API serves data and never places orders.
 from .client import API_URL, MCP_URL, Skylit, SkylitError
 
 __all__ = ["Skylit", "SkylitError", "API_URL", "MCP_URL"]
-__version__ = "0.1.1"
+__version__ = "0.1.2"

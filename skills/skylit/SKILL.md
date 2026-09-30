@@ -19,7 +19,7 @@ the user's Skylit credits, so plan the calls before making them.
 - Every result's `meta` carries the remaining balance. Watch it on long tasks.
 - Range-priced tools (`market_tide`, `underlying_chart`, `contract_chart`,
   `aggregate_score`) charge again for each further 30 days of range.
-- Full price list: https://www.skylit.ai/docs/mcp/tools
+- Full price list: https://www.skylit.ai/docs/mcp/tools?utm_source=github&utm_medium=developer&utm_campaign=api_distribution&utm_content=skills-skylit-skill
 
 ## Workflow
 
@@ -90,7 +90,7 @@ the user's Skylit credits, so plan the calls before making them.
 ## Use of the data
 
 Data is licensed to the user for their own trading, research and education
-under the API Terms (https://www.skylit.ai/api-terms). Don't present results as
+under the API Terms (https://www.skylit.ai/api-terms?utm_source=github&utm_medium=developer&utm_campaign=api_distribution&utm_content=skills-skylit-skill). Don't present results as
 investment advice, and don't help republish bulk data. Order execution is out
 of scope; it belongs to the user's own broker.
 

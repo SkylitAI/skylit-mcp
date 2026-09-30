@@ -12,7 +12,7 @@ orders. Order execution is left to your own broker.
 ```bash
 npm ci
 
-export SKYLIT_API_KEY="..."     # https://app.skylit.ai/developer
+export SKYLIT_API_KEY="..."     # https://app.skylit.ai/developer?utm_source=github&utm_medium=developer&utm_campaign=api_distribution&utm_content=examples-typescript-vercel-ai-sdk-readme
 export OPENAI_API_KEY="..."
 npm start -- "What are the key gamma levels and today's flow tone for SPY?"
 ```

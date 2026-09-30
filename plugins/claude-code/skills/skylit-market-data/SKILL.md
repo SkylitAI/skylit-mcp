@@ -23,4 +23,4 @@ spends the user's Skylit API credits, so pick the narrowest tool that answers th
 Data is licensed for the user's own research. Do not present it as investment advice.
 
 Full reference (REST, MCP, errors, limits): https://www.skylit.ai/docs/skill.md
-Tool catalog with credit costs: https://www.skylit.ai/docs/mcp/tools
+Tool catalog with credit costs: https://www.skylit.ai/docs/mcp/tools?utm_source=github&utm_medium=developer&utm_campaign=api_distribution&utm_content=plugins-claude-code-skills-skylit-market-data-skill

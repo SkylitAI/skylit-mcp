@@ -1,12 +1,12 @@
 # @skylitai/sdk
 
-A TypeScript client for [Skylit](https://www.skylit.ai) market data. Skylit covers options flow, volatility, dealer positioning (GEX/vanna levels and point-in-time replay) and dark pool, and is built for AI trading agents and the people who build them.
+A TypeScript client for [Skylit](https://www.skylit.ai/?utm_source=npm&utm_medium=developer&utm_campaign=api_distribution&utm_content=packages-typescript-readme) market data. Skylit covers options flow, volatility, dealer positioning (GEX/vanna levels and point-in-time replay) and dark pool, and is built for AI trading agents and the people who build them.
 
 It is typed, has no dependencies, and runs on Node 18+, Bun, Deno and edge runtimes. Every call is read-only: it fetches data and never places orders.
 
 ```bash
 npm install @skylitai/sdk
-export SKYLIT_API_KEY=...   # create one at https://app.skylit.ai/developer
+export SKYLIT_API_KEY=...   # create one at https://app.skylit.ai/developer?utm_source=npm&utm_medium=developer&utm_campaign=api_distribution&utm_content=packages-typescript-readme
 ```
 
 ```ts
@@ -30,7 +30,7 @@ For Claude, ChatGPT, Cursor, the Vercel AI SDK, the OpenAI Agents SDK and other 
 
 ## Pricing and terms
 
-Calls are billed in credits (1 credit = $0.001; most calls cost 1 to 5). See [the docs](https://www.skylit.ai/docs). Use of Skylit data is governed by the [API Terms](https://www.skylit.ai/api-terms), which cover personal and research use; for commercial use, contact support@skylit.ai. The MIT license covers this client's code, not Skylit data.
+Calls are billed in credits (1 credit = $0.001; most calls cost 1 to 5). See [the docs](https://www.skylit.ai/docs?utm_source=npm&utm_medium=developer&utm_campaign=api_distribution&utm_content=packages-typescript-readme). Use of Skylit data is governed by the [API Terms](https://www.skylit.ai/api-terms?utm_source=npm&utm_medium=developer&utm_campaign=api_distribution&utm_content=packages-typescript-readme), which cover personal and research use; for commercial use, contact support@skylit.ai. The MIT license covers this client's code, not Skylit data.
 
 ## Staying current
 

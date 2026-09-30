@@ -21,7 +21,7 @@ Then run `/mcp`, pick **skylit** and choose **Authenticate**.
 ## API key (headless machines, CI)
 
 ```bash
-export SKYLIT_API_KEY="..."   # from https://app.skylit.ai/developer
+export SKYLIT_API_KEY="..."   # from https://app.skylit.ai/developer?utm_source=github&utm_medium=developer&utm_campaign=api_distribution&utm_content=clients-claude-code
 claude mcp add --transport http skylit https://mcp.skylit.ai/mcp \
   --header "Authorization: Bearer $SKYLIT_API_KEY"
 ```

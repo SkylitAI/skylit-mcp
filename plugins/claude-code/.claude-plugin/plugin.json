@@ -6,8 +6,8 @@
   "author": {
     "name": "Skylit",
     "email": "support@skylit.ai",
-    "url": "https://www.skylit.ai"
+    "url": "https://www.skylit.ai/?utm_source=github&utm_medium=developer&utm_campaign=api_distribution&utm_content=plugins-claude-code-claude-plugin-plugin"
   },
-  "homepage": "https://www.skylit.ai/docs/mcp/overview",
+  "homepage": "https://www.skylit.ai/docs/mcp/overview?utm_source=github&utm_medium=developer&utm_campaign=api_distribution&utm_content=plugins-claude-code-claude-plugin-plugin",
   "keywords": ["mcp", "options", "market-data", "gex", "volatility"]
 }

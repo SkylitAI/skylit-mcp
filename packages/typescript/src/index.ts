@@ -11,7 +11,7 @@
 
 export const API_URL = "https://api.skylit.ai";
 export const MCP_URL = "https://mcp.skylit.ai/mcp";
-export const VERSION = "0.1.1";
+export const VERSION = "0.1.2";
 
 export type Symbols = string | readonly string[];
 export type Params = Record<string, string | number | boolean | readonly string[] | undefined | null>;
