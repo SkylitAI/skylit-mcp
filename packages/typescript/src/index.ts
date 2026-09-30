@@ -1,7 +1,7 @@
 /**
  * Skylit market data for TypeScript and AI agents.
  *
- *   import { Skylit } from "skylit";
+ *   import { Skylit } from "@skylitai/sdk";
  *   const skylit = new Skylit();          // reads SKYLIT_API_KEY
  *   await skylit.gexLevels("SPY");
  *

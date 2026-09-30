@@ -1,16 +1,16 @@
-# skylit
+# @skylitai/sdk
 
 A TypeScript client for [Skylit](https://www.skylit.ai) market data. Skylit covers options flow, volatility, dealer positioning (GEX/vanna levels and point-in-time replay) and dark pool, and is built for AI trading agents and the people who build them.
 
 It is typed, has no dependencies, and runs on Node 18+, Bun, Deno and edge runtimes. Every call is read-only: it fetches data and never places orders.
 
 ```bash
-npm install skylit
+npm install @skylitai/sdk
 export SKYLIT_API_KEY=...   # create one at https://app.skylit.ai/developer
 ```
 
 ```ts
-import { Skylit } from "skylit";
+import { Skylit } from "@skylitai/sdk";
 
 const skylit = new Skylit();
 

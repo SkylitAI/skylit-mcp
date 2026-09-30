@@ -63,15 +63,15 @@ Source and docs: [packages/python](packages/python).
 ## TypeScript
 
 ```bash
-npm install skylit
+npm install @skylitai/sdk
 ```
 
 ```ts
-import { Skylit } from "skylit";
+import { Skylit } from "@skylitai/sdk";
 await new Skylit().gexLevels("SPY");   // reads SKYLIT_API_KEY
 ```
 
-Source and docs: [packages/typescript](packages/typescript). (The npm release follows shortly.)
+Source and docs: [packages/typescript](packages/typescript).
 
 ## Staying current
 
