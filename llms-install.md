@@ -41,4 +41,4 @@ locally.
 - `403`: the key is recognized but API access isn't active on the account.
 - `402`: out of credits. The user can check the balance on the Developer page.
 
-All 63 tools are read-only. Tool catalog: https://www.skylit.ai/docs/mcp/tools
+All tools are read-only. Tool catalog: https://www.skylit.ai/docs/mcp/tools

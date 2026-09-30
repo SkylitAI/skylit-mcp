@@ -1,0 +1,57 @@
+name: Sync with the live API
+
+# Keeps reference/ and the README's generated block in step with Skylit's
+# published catalog and specs, and fails (with an issue) when a guide, skill,
+# example or SDK names a tool or endpoint that no longer exists.
+on:
+  schedule:
+    - cron: "17 */6 * * *"
+  workflow_dispatch:
+  repository_dispatch:
+    types: [api-changed]
+  pull_request:
+
+permissions:
+  contents: write
+  issues: write
+
+concurrency:
+  group: sync
+  cancel-in-progress: false
+
+jobs:
+  sync:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-python@v5
+        with:
+          python-version: "3.12"
+      - name: Refresh from the live docs
+        if: github.event_name != 'pull_request'
+        run: python3 scripts/sync.py || echo "DRIFT=1" >> "$GITHUB_ENV"
+      - name: Check references (pull requests)
+        if: github.event_name == 'pull_request'
+        run: python3 scripts/sync.py --check
+      - name: Commit refreshed reference files
+        if: github.event_name != 'pull_request'
+        run: |
+          if [ -n "$(git status --porcelain reference README.md)" ]; then
+            git config user.name "skylit-sync[bot]"
+            git config user.email "support@skylit.ai"
+            git add reference README.md
+            git commit -m "sync: refresh reference/ from the live API catalog and specs"
+            git push
+          else
+            echo "No catalog or spec changes."
+          fi
+      - name: Open or update the drift issue
+        if: github.event_name != 'pull_request' && env.DRIFT == '1'
+        env:
+          GH_TOKEN: ${{ github.token }}
+        run: |
+          body=$(python3 scripts/sync.py --check 2>&1 || true)
+          n=$(gh issue list --label api-drift --state open --json number --jq '.[0].number')
+          gh label create api-drift --color d73a4a --description "Repo names a tool or endpoint the live API no longer has" 2>/dev/null || true
+          if [ -n "$n" ]; then gh issue comment "$n" --body "$body"; else gh issue create --label api-drift --title "API drift: update guides, skills, examples or SDKs" --body "$body"; fi
+          exit 1

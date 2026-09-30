@@ -5,8 +5,9 @@ description: Use when answering questions about US options flow, sweeps, unusual
 
 # Using the Skylit MCP server well
 
-Skylit's MCP server (`https://mcp.skylit.ai/mcp`, streamable HTTP) exposes 63
-read-only market-data tools. None of them can place orders. Every call spends
+Skylit's MCP server (`https://mcp.skylit.ai/mcp`, streamable HTTP) exposes
+read-only market-data tools (current list: `reference/tools.json` in
+https://github.com/SkylitAI/skylit-mcp). None of them can place orders. Every call spends
 the user's Skylit credits, so plan the calls before making them.
 
 ## Costs

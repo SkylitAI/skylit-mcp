@@ -5,7 +5,7 @@
 Skylit is the data intelligence platform for AI trading: options flow,
 volatility, dealer positioning and dark pool data for US markets.
 The Skylit MCP server gives any MCP client (Claude, ChatGPT, Cursor, VS Code,
-Gemini CLI, Codex and others) 63 read-only tools over that data.
+Gemini CLI, Codex and others) read-only tools over that data.
 
 This repository holds setup guides for each client, the Claude Code plugin, a
 Gemini CLI extension, an agent skill, and runnable examples. It contains no
@@ -73,6 +73,10 @@ await new Skylit().gexLevels("SPY");   // reads SKYLIT_API_KEY
 
 Source and docs: [packages/typescript](packages/typescript). (The npm release follows shortly.)
 
+## Staying current
+
+This repo is checked against the live API every 6 hours (`scripts/sync.py`, [sync workflow](.github/workflows/sync.yml)): the tool catalog and REST specs in [reference/](reference/) are refreshed from Skylit's published docs, and any guide, skill, example or SDK that names a tool or endpoint that no longer exists fails the check and opens an issue.
+
 ## Clients
 
 | Client | Sign in with Skylit | API key | Guide |
@@ -100,25 +104,25 @@ of 2026-09-30. Guides mark anything we could not confirm.
 
 ## Tools
 
-63 tools, all read-only. Each wraps one Skylit REST endpoint with the same
-credit cost. Full catalog with arguments and prices:
-[www.skylit.ai/docs/mcp/tools](https://www.skylit.ai/docs/mcp/tools).
+<!-- sync:tools:start -->
+63 tools, all read-only. Each wraps one Skylit REST endpoint with the same credit cost. Full catalog with arguments and prices: [www.skylit.ai/docs/mcp/tools](https://www.skylit.ai/docs/mcp/tools); machine-readable copy: [reference/tools.json](reference/tools.json).
 
-| Family | Tools |
+| Group | Tools |
 | --- | --- |
-| **Discovery** | `flow_search`, `list_active_underlyings`, `expirations` |
-| **Options flow and scores** | `flow_feed`, `trade_score`, `aggregate_score`, `flow_aggregate` |
-| **Sweeps and momentum** | `sweeps`, `flow_momentum`, `flow_baseline` |
-| **Strike and tide concentration** | `flow_strikes`, `flow_tide`, `by_strike` |
-| **Screeners** | `top_underlyings_daily`, `top_underlyings_weekly`, `top_contracts_daily`, `top_contracts_weekly`, `unusual_volume`, `unusual_oi` |
-| **Bull/bear and pressure** | `chain_bull_bear`, `contract_bull_bear`, `chain_ratio`, `contract_ratio` |
-| **Stats, history, Vol/OI, moneyness** | `underlying_stats`, `underlying_bulk_stats`, `contract_bulk_stats`, `underlying_history`, `contract_history`, `flow_historical_compare`, `contract_stats`, `vol_oi`, `moneyness` |
-| **Chain analytics and charts** | `option_chain`, `underlying_chart`, `contract_chart`, `underlying_rvol`, `contract_rvol` |
-| **Market-wide and sector** | `market_overview`, `market_tide`, `market_breadth`, `sector_flow` |
-| **Dark pool** | `dark_pool_trades`, `dark_pool_top_prints` |
-| **Gamma/vanna heatmaps and key levels** | `heat_levels`, `heat_heatmap`, `heat_historical_heatmap` (point-in-time replay with `at`, up to 365 days back), `heat_stats_daily`, `heat_symbols` |
-| **Tempest volatility suite** | `tempest_iv`, `tempest_term`, `tempest_cones`, `tempest_sigma`, `tempest_surface`, `tempest_tilt`, `tempest_events`, `tempest_snapshot`, `tempest_market`, `tempest_screener`, `tempest_history`, `tempest_derived`, `tempest_status`, `tempest_symbols` |
-| **Account** | `account_usage` |
+| Discovery | `flow_search`, `list_active_underlyings`, `expirations` |
+| Scores & trades | `flow_feed`, `trade_score`, `aggregate_score`, `flow_aggregate` |
+| Sweeps & momentum | `sweeps`, `flow_momentum`, `flow_baseline` |
+| Strike & tide concentration | `flow_strikes`, `flow_tide`, `by_strike` |
+| Screeners | `top_underlyings_daily`, `top_underlyings_weekly`, `top_contracts_daily`, `top_contracts_weekly`, `unusual_volume`, `unusual_oi` |
+| Bull/bear & pressure ratios | `chain_bull_bear`, `contract_bull_bear`, `chain_ratio`, `contract_ratio` |
+| Stats, Vol/OI & moneyness | `underlying_stats`, `underlying_bulk_stats`, `contract_bulk_stats`, `underlying_history`, `contract_history`, `flow_historical_compare`, `contract_stats`, `vol_oi`, `moneyness` |
+| Chains, charts & RVOL | `option_chain`, `underlying_chart`, `contract_chart`, `underlying_rvol`, `contract_rvol` |
+| Market-wide & sector | `market_overview`, `market_tide`, `market_breadth`, `sector_flow` |
+| Dark pool | `dark_pool_trades`, `dark_pool_top_prints` |
+| Heatseeker — gamma/vanna heatmaps | `heat_heatmap`, `heat_levels`, `heat_historical_heatmap`, `heat_stats_daily`, `heat_symbols` |
+| Tempest — volatility suite | `tempest_iv`, `tempest_term`, `tempest_cones`, `tempest_sigma`, `tempest_surface`, `tempest_tilt`, `tempest_events`, `tempest_snapshot`, `tempest_market`, `tempest_screener`, `tempest_history`, `tempest_derived`, `tempest_status`, `tempest_symbols` |
+| Account | `account_usage` |
+<!-- sync:tools:end -->
 
 Tempest tools depend on your plan; without access they return `not_entitled`
 at no charge. OHLCV price bars (Atlas) are available over REST, not MCP.

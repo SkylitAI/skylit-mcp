@@ -1,0 +1,447 @@
+{
+  "server": "https://mcp.skylit.ai/mcp",
+  "count": 63,
+  "tools": [
+    {
+      "name": "flow_search",
+      "section": "Discovery",
+      "returns": "Search underlyings by ticker fragment",
+      "endpoint": "GET /v1/underlying/search",
+      "credits": "1"
+    },
+    {
+      "name": "list_active_underlyings",
+      "section": "Discovery",
+      "returns": "Every underlying that traded options on a date, ranked by premium",
+      "endpoint": "GET /v1/underlying",
+      "credits": "1"
+    },
+    {
+      "name": "expirations",
+      "section": "Discovery",
+      "returns": "Available expiration dates for an underlying, with contract counts",
+      "endpoint": "GET /v1/underlying/{ticker}/expirations",
+      "credits": "1"
+    },
+    {
+      "name": "flow_feed",
+      "section": "Scores & trades",
+      "returns": "Recent scored trades (Flow Score, FlowBonus) + VWF/SDF/FIR aggregates",
+      "endpoint": "GET /v1/flow/{ticker}",
+      "credits": "1"
+    },
+    {
+      "name": "trade_score",
+      "section": "Scores & trades",
+      "returns": "Full scoring + context for one trade id (from a `flow_feed` row)",
+      "endpoint": "GET /v1/score/{trade_id}",
+      "credits": "1"
+    },
+    {
+      "name": "aggregate_score",
+      "section": "Scores & trades",
+      "returns": "Composite + VWF/SDF/FIR across one or more trailing timeframes",
+      "endpoint": "GET /v1/aggregate/{ticker}",
+      "credits": "3"
+    },
+    {
+      "name": "flow_aggregate",
+      "section": "Scores & trades",
+      "returns": "Server-side rollup over an arbitrary `[start_time, end_time]` window",
+      "endpoint": "GET /v1/flow/{ticker}/aggregate",
+      "credits": "3"
+    },
+    {
+      "name": "sweeps",
+      "section": "Sweeps & momentum",
+      "returns": "Aggregated multi-exchange sweeps with venues, premium, moneyness, score",
+      "endpoint": "GET /v1/sweeps/{ticker}",
+      "credits": "3"
+    },
+    {
+      "name": "flow_momentum",
+      "section": "Sweeps & momentum",
+      "returns": "Live 5m/30m/1h flow vs trailing baseline, with z-scores + trend label",
+      "endpoint": "GET /v1/flow/{ticker}/momentum",
+      "credits": "3"
+    },
+    {
+      "name": "flow_baseline",
+      "section": "Sweeps & momentum",
+      "returns": "Trailing per-time-of-day baseline `flow_momentum` compares against",
+      "endpoint": "GET /v1/flow/{ticker}/baseline",
+      "credits": "3"
+    },
+    {
+      "name": "flow_strikes",
+      "section": "Strike & tide concentration",
+      "returns": "Top-N strikes by net/total premium with bull/bear split + OI context",
+      "endpoint": "GET /v1/flow/{ticker}/strikes",
+      "credits": "3"
+    },
+    {
+      "name": "flow_tide",
+      "section": "Strike & tide concentration",
+      "returns": "Bucketed bullish vs bearish premium with cumulative net premium",
+      "endpoint": "GET /v1/flow/{ticker}/tide",
+      "credits": "3"
+    },
+    {
+      "name": "by_strike",
+      "section": "Strike & tide concentration",
+      "returns": "Strike-level distribution of a day's flow, optionally by DTE band",
+      "endpoint": "GET /v1/underlying/{ticker}/by-strike",
+      "credits": "3"
+    },
+    {
+      "name": "top_underlyings_daily",
+      "section": "Screeners",
+      "returns": "Top underlyings by single-day flow (call/put split, net premium, ratio)",
+      "endpoint": "GET /v1/underlying/top/daily",
+      "credits": "1"
+    },
+    {
+      "name": "top_underlyings_weekly",
+      "section": "Screeners",
+      "returns": "Same, over the trailing week",
+      "endpoint": "GET /v1/underlying/top/weekly",
+      "credits": "1"
+    },
+    {
+      "name": "top_contracts_daily",
+      "section": "Screeners",
+      "returns": "Single-day top-contract screener (premium / volume / OI / sweeps)",
+      "endpoint": "GET /v1/contract/top/daily",
+      "credits": "3 (1 with `ticker`)"
+    },
+    {
+      "name": "top_contracts_weekly",
+      "section": "Screeners",
+      "returns": "Same, over the trailing week",
+      "endpoint": "GET /v1/contract/top/weekly",
+      "credits": "1"
+    },
+    {
+      "name": "unusual_volume",
+      "section": "Screeners",
+      "returns": "Contracts with anomalous volume vs an `avg_period` baseline (RVOL)",
+      "endpoint": "GET /v1/contract/unusual-volume",
+      "credits": "3"
+    },
+    {
+      "name": "unusual_oi",
+      "section": "Screeners",
+      "returns": "Contracts with significant open-interest changes (opening vs closing)",
+      "endpoint": "GET /v1/contract/unusual-oi",
+      "credits": "3"
+    },
+    {
+      "name": "chain_bull_bear",
+      "section": "Bull/bear & pressure ratios",
+      "returns": "Chain-level bull/bear/neutral % with call- and put-only breakdowns",
+      "endpoint": "GET /v1/chain-bull-bear/{ticker}",
+      "credits": "3"
+    },
+    {
+      "name": "contract_bull_bear",
+      "section": "Bull/bear & pressure ratios",
+      "returns": "Bull/bear/neutral % for a single OPRA contract",
+      "endpoint": "GET /v1/contract-bull-bear/{symbol}",
+      "credits": "1"
+    },
+    {
+      "name": "chain_ratio",
+      "section": "Bull/bear & pressure ratios",
+      "returns": "Chain-level ask/bid/mid + aggression ratios with a bias interpretation",
+      "endpoint": "GET /v1/chain-ratio/{ticker}",
+      "credits": "1"
+    },
+    {
+      "name": "contract_ratio",
+      "section": "Bull/bear & pressure ratios",
+      "returns": "Same bid/ask/mid pressure for a single OPRA contract",
+      "endpoint": "GET /v1/contract-ratio/{symbol}",
+      "credits": "1"
+    },
+    {
+      "name": "underlying_stats",
+      "section": "Stats, Vol/OI & moneyness",
+      "returns": "Daily aggregate stats for an underlying (premium, volume, net, OI)",
+      "endpoint": "GET /v1/underlying/{ticker}/stats",
+      "credits": "1"
+    },
+    {
+      "name": "underlying_bulk_stats",
+      "section": "Stats, Vol/OI & moneyness",
+      "returns": "One-day stats (premium, volume, call/put split, net premium) for up to 50 tickers in one call; tickers with no options activity are absent",
+      "endpoint": "GET /v1/underlying/bulk/stats",
+      "credits": "5"
+    },
+    {
+      "name": "contract_bulk_stats",
+      "section": "Stats, Vol/OI & moneyness",
+      "returns": "One-day stats for up to 50 option contracts (OPRA symbols) in one call",
+      "endpoint": "GET /v1/contract/bulk/stats",
+      "credits": "5"
+    },
+    {
+      "name": "underlying_history",
+      "section": "Stats, Vol/OI & moneyness",
+      "returns": "Daily options-flow history for a ticker, one row per trading day (premium, volume, call/put split, net premium)",
+      "endpoint": "GET /v1/underlying/{ticker}/history",
+      "credits": "5"
+    },
+    {
+      "name": "contract_history",
+      "section": "Stats, Vol/OI & moneyness",
+      "returns": "Daily history for one contract: premium, volume, OI change, bid/ask split, sweep and multi-leg share, VWAP, last price, IV, trade count",
+      "endpoint": "GET /v1/contract/{symbol}/history",
+      "credits": "5"
+    },
+    {
+      "name": "flow_historical_compare",
+      "section": "Stats, Vol/OI & moneyness",
+      "returns": "Today's flow vs its trailing 20-trading-day average: deltas, percentile ranks and the five most similar past days",
+      "endpoint": "GET /v1/flow/{ticker}/historical-compare",
+      "credits": "5"
+    },
+    {
+      "name": "contract_stats",
+      "section": "Stats, Vol/OI & moneyness",
+      "returns": "Daily aggregate stats for a contract (volume, OI, premium, IV)",
+      "endpoint": "GET /v1/contract/{symbol}/stats",
+      "credits": "1"
+    },
+    {
+      "name": "vol_oi",
+      "section": "Stats, Vol/OI & moneyness",
+      "returns": "Vol/OI accumulation analysis; distinguishes new positioning from closing",
+      "endpoint": "GET /v1/vol-oi/{ticker}",
+      "credits": "1"
+    },
+    {
+      "name": "moneyness",
+      "section": "Stats, Vol/OI & moneyness",
+      "returns": "Premium/sentiment split across deep_itm\u2026deep_otm + detected patterns",
+      "endpoint": "GET /v1/moneyness/{ticker}",
+      "credits": "1"
+    },
+    {
+      "name": "option_chain",
+      "section": "Chains, charts & RVOL",
+      "returns": "Full chain at an expiration (per-strike call/put volume, OI, premium)",
+      "endpoint": "GET /v1/underlying/{ticker}/chain",
+      "credits": "3"
+    },
+    {
+      "name": "underlying_chart",
+      "section": "Chains, charts & RVOL",
+      "returns": "Intraday OHLC-style bars for an underlying",
+      "endpoint": "GET /v1/underlying/{ticker}/chart",
+      "credits": "3"
+    },
+    {
+      "name": "contract_chart",
+      "section": "Chains, charts & RVOL",
+      "returns": "Intraday OHLC-style bars for a single contract",
+      "endpoint": "GET /v1/contract/{symbol}/chart",
+      "credits": "3"
+    },
+    {
+      "name": "underlying_rvol",
+      "section": "Chains, charts & RVOL",
+      "returns": "Relative-volume bars for an underlying (`format=summary` for stats only)",
+      "endpoint": "GET /v1/underlying/{ticker}/rvol",
+      "credits": "1"
+    },
+    {
+      "name": "contract_rvol",
+      "section": "Chains, charts & RVOL",
+      "returns": "Relative-volume bars for a single contract",
+      "endpoint": "GET /v1/contract/{symbol}/rvol",
+      "credits": "1"
+    },
+    {
+      "name": "market_overview",
+      "section": "Market-wide & sector",
+      "returns": "Market-wide flow for the day + top tickers by premium",
+      "endpoint": "GET /v1/market/overview",
+      "credits": "3"
+    },
+    {
+      "name": "market_tide",
+      "section": "Market-wide & sector",
+      "returns": "Bucketed net call/put premium time series with an SPY overlay",
+      "endpoint": "GET /v1/market/tide",
+      "credits": "3"
+    },
+    {
+      "name": "market_breadth",
+      "section": "Market-wide & sector",
+      "returns": "SPY/QQQ/IWM sentiment, advance/decline, per-sector rotation",
+      "endpoint": "GET /v1/flow/market-breadth",
+      "credits": "3"
+    },
+    {
+      "name": "sector_flow",
+      "section": "Market-wide & sector",
+      "returns": "Sector/industry flow aggregation with top-contributor tickers",
+      "endpoint": "GET /v1/flow/sector/{sector}",
+      "credits": "3"
+    },
+    {
+      "name": "dark_pool_trades",
+      "section": "Dark pool",
+      "returns": "Paginated off-exchange prints (filters: tickers / date range / notional / venue / sector); `$1M+` by default, span capped at 31 days",
+      "endpoint": "GET /v1/dark-pool/trades",
+      "credits": "5"
+    },
+    {
+      "name": "dark_pool_top_prints",
+      "section": "Dark pool",
+      "returns": "Top-N largest prints for a ticker over a trailing window, ordered by notional",
+      "endpoint": "GET /v1/dark-pool/top-prints/{ticker}",
+      "credits": "3"
+    },
+    {
+      "name": "heat_heatmap",
+      "section": "Heatseeker \u2014 gamma/vanna heatmaps",
+      "returns": "Current per-strike gamma/vanna heatmap + live velocity (multi-symbol)",
+      "endpoint": "GET /v1/heatmap",
+      "credits": "1"
+    },
+    {
+      "name": "heat_levels",
+      "section": "Heatseeker \u2014 gamma/vanna heatmaps",
+      "returns": "Key levels only: classified nodes (king, gatekeeper, pika, barney, significant), strongest first, with distance from spot",
+      "endpoint": "GET /v1/gex/levels",
+      "credits": "1"
+    },
+    {
+      "name": "heat_historical_heatmap",
+      "section": "Heatseeker \u2014 gamma/vanna heatmaps",
+      "returns": "Replay the heatmap at a past instant (up to 365 days back)",
+      "endpoint": "GET /v1/historical",
+      "credits": "5"
+    },
+    {
+      "name": "heat_stats_daily",
+      "section": "Heatseeker \u2014 gamma/vanna heatmaps",
+      "returns": "Daily gamma/vanna stats for up to 50 symbols over up to 31 days (400 symbol-days): spot OHLC, largest positive and negative strike exposure, concentration",
+      "endpoint": "GET /v1/stats/daily",
+      "credits": "5"
+    },
+    {
+      "name": "heat_symbols",
+      "section": "Heatseeker \u2014 gamma/vanna heatmaps",
+      "returns": "Every symbol with gamma/vanna data: index flag, previous tickers after a rename, available metrics and history date range",
+      "endpoint": "GET /v1/symbols",
+      "credits": "0"
+    },
+    {
+      "name": "tempest_iv",
+      "section": "Tempest \u2014 volatility suite",
+      "returns": "Constant-maturity IV (SVX) at 1d/9d/30d/3m/6m, IV rank and percentiles, ratio to the VIX, term slope and mean-reversion odds",
+      "endpoint": "GET /v1/vol/iv",
+      "credits": "1"
+    },
+    {
+      "name": "tempest_term",
+      "section": "Tempest \u2014 volatility suite",
+      "returns": "Implied vol per listed expiry, for contango/backwardation reads",
+      "endpoint": "GET /v1/vol/term",
+      "credits": "1"
+    },
+    {
+      "name": "tempest_cones",
+      "section": "Tempest \u2014 volatility suite",
+      "returns": "The 1-sigma move priced for today's close, 1 day, the week, monthly opex and 30 days, as percent and price bands",
+      "endpoint": "GET /v1/vol/cones",
+      "credits": "1"
+    },
+    {
+      "name": "tempest_sigma",
+      "section": "Tempest \u2014 volatility suite",
+      "returns": "Today's move in units of the one-day move priced at the prior close, move budget left, odds of 1- and 2-sigma days, last 60 sessions",
+      "endpoint": "GET /v1/vol/sigma",
+      "credits": "1"
+    },
+    {
+      "name": "tempest_surface",
+      "section": "Tempest \u2014 volatility suite",
+      "returns": "30-day 25-delta risk reversal and butterfly, ATM vol, skew percentile, a per-symbol SKEW index and the smile per expiry",
+      "endpoint": "GET /v1/vol/surface",
+      "credits": "3"
+    },
+    {
+      "name": "tempest_tilt",
+      "section": "Tempest \u2014 volatility suite",
+      "returns": "One-strike-OTM call vs put imbalance (raw and forward-adjusted), the cheap side, z-score and percentile",
+      "endpoint": "GET /v1/vol/tilt",
+      "credits": "1"
+    },
+    {
+      "name": "tempest_events",
+      "section": "Tempest \u2014 volatility suite",
+      "returns": "Next earnings date and timing, implied event move vs past realized moves, VRP and 20-day realized vol",
+      "endpoint": "GET /v1/vol/events",
+      "credits": "1"
+    },
+    {
+      "name": "tempest_snapshot",
+      "section": "Tempest \u2014 volatility suite",
+      "returns": "Every Tempest module in one call (iv, term, cones, sigma, surface, tilt, events)",
+      "endpoint": "GET /v1/vol/snapshot",
+      "credits": "5"
+    },
+    {
+      "name": "tempest_market",
+      "section": "Tempest \u2014 volatility suite",
+      "returns": "VIX1D/9D/VIX/3M/6M, VVIX and SKEW from SPX and VIX chains, curve state and roll, regime, Mag-7 dispersion, Fear & Greed",
+      "endpoint": "GET /v1/vol/market",
+      "credits": "1"
+    },
+    {
+      "name": "tempest_screener",
+      "section": "Tempest \u2014 volatility suite",
+      "returns": "Radar: screen every covered symbol on IV rank, SVX percentiles, ratio to VIX, skew, tilt, expected move, sigma, earnings, VRP; up to 500 rows",
+      "endpoint": "GET /v1/vol/screener",
+      "credits": "5"
+    },
+    {
+      "name": "tempest_history",
+      "section": "Tempest \u2014 volatility suite",
+      "returns": "One row per stored session at its close (OHLC, SVX per tenor, ATM vol, term slope, skew, tilt, chain depth), up to about two years",
+      "endpoint": "GET /v1/vol/history",
+      "credits": "1 per 10 symbol-weekdays in the window, min 1 (3 for 1 symbol x 1 month)"
+    },
+    {
+      "name": "tempest_derived",
+      "section": "Tempest \u2014 volatility suite",
+      "returns": "One year daily: 20-day realized vol, VRP series and percentile, the SVX30 usual-range band, earnings-eve sessions, spot-vol correlation",
+      "endpoint": "GET /v1/vol/derived",
+      "credits": "3"
+    },
+    {
+      "name": "tempest_status",
+      "section": "Tempest \u2014 volatility suite",
+      "returns": "When Tempest last computed, the session it belongs to, whether it is serving the frozen close, market state and coverage counts",
+      "endpoint": "GET /v1/vol/status",
+      "credits": "0"
+    },
+    {
+      "name": "tempest_symbols",
+      "section": "Tempest \u2014 volatility suite",
+      "returns": "Every symbol Tempest covers, with its latest asOf and last stored daily session",
+      "endpoint": "GET /v1/vol/symbols",
+      "credits": "0"
+    },
+    {
+      "name": "account_usage",
+      "section": "Account",
+      "returns": "Balance in credits and US dollars, unlimited flag, and the limits that apply",
+      "endpoint": "GET /v1/account",
+      "credits": "0"
+    }
+  ]
+}
