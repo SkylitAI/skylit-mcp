@@ -118,7 +118,7 @@ https://mcp.skylit.ai/mcp?toolset=intelligence
 | `market_brief` | VIX complex, market-wide options flow, SPX and QQQ levels | 5 |
 | `flow_context` | Today's options flow read for a ticker | 9 |
 
-They are rolling out one at a time; a tool that is not on yet says so and is not charged. Details: [Intelligence tools](https://www.skylit.ai/docs/mcp/intelligence?utm_source=github&utm_medium=developer&utm_campaign=api_distribution&utm_content=readme).
+Details: [Intelligence tools](https://www.skylit.ai/docs/mcp/intelligence?utm_source=github&utm_medium=developer&utm_campaign=api_distribution&utm_content=readme).
 
 ## Tools
 
@@ -140,7 +140,7 @@ They are rolling out one at a time; a tool that is not on yet says so and is not
 | Heatseeker — gamma/vanna heatmaps | `heat_heatmap`, `heat_levels`, `heat_historical_heatmap`, `heat_stats_daily`, `heat_symbols` |
 | Tempest — volatility suite | `tempest_iv`, `tempest_term`, `tempest_cones`, `tempest_sigma`, `tempest_surface`, `tempest_tilt`, `tempest_events`, `tempest_snapshot`, `tempest_market`, `tempest_screener`, `tempest_history`, `tempest_derived`, `tempest_status`, `tempest_symbols` |
 | Account | `account_usage` |
-| Intelligence tools (rolling out) | `explain_levels`, `vol_context`, `whats_changed`, `market_brief`, `flow_context` |
+| Intelligence tools | `explain_levels`, `vol_context`, `whats_changed`, `market_brief`, `flow_context` |
 <!-- sync:tools:end -->
 
 Tempest tools depend on your plan; without access they return `not_entitled`

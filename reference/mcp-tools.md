@@ -181,9 +181,9 @@ Check your balance and limits before large pulls.
 | --- | --- | --- | --- | --: |
 | `account_usage` | Balance in credits and US dollars, unlimited flag, and the limits that apply | none | `GET /v1/account` | 0 |
 
-## Intelligence tools (rolling out)
+## Intelligence tools
 
-One-call answers built from the tools above, each with a short factual `summary`, compact `data`, and `meta` (`cost`, `creditsRemaining`, `asOf`, `partial`). They are served on a separate tool list so agents that want them load only these: connect to `https://mcp.skylit.ai/mcp?toolset=intelligence`. The default `/mcp` list does not include them. They are being switched on one at a time; a tool that is not on yet answers that it is not available, at no charge. See [Intelligence tools](https://www.skylit.ai/docs/mcp/intelligence).
+One-call answers built from the tools above, each with a short factual `summary`, compact `data`, and `meta` (`cost`, `creditsRemaining`, `asOf`, `partial`). They are served on a separate tool list so agents that want them load only these: connect to `https://mcp.skylit.ai/mcp?toolset=intelligence`. The default `/mcp` list does not include them. See [Intelligence tools](https://www.skylit.ai/docs/mcp/intelligence).
 
 | Tool | Returns | Arguments | Endpoint | Credits |
 | --- | --- | --- | --- | --: |

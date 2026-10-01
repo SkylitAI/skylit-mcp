@@ -445,14 +445,14 @@
     },
     {
       "name": "explain_levels",
-      "section": "Intelligence tools (rolling out)",
+      "section": "Intelligence tools",
       "returns": "Key dealer-positioning levels for one symbol: spot, King node, flip, largest positive and negative walls, net exposure, five largest levels",
       "endpoint": "GET /v1/gex/levels",
       "credits": "1"
     },
     {
       "name": "vol_context",
-      "section": "Intelligence tools (rolling out)",
+      "section": "Intelligence tools",
       "returns": "30-day implied volatility, IV rank, 1-year percentile and range, curve shape, 1-sigma expected moves by horizon (from the current price), scheduled events",
       "endpoint": [
         "GET /v1/vol/iv",
@@ -462,7 +462,7 @@
     },
     {
       "name": "whats_changed",
-      "section": "Intelligence tools (rolling out)",
+      "section": "Intelligence tools",
       "returns": "How one symbol's board moved since an earlier instant: spot move, King node then and now, the five strikes whose net exposure changed most",
       "endpoint": [
         "GET /v1/historical",
@@ -472,7 +472,7 @@
     },
     {
       "name": "market_brief",
-      "section": "Intelligence tools (rolling out)",
+      "section": "Intelligence tools",
       "returns": "VIX complex (computed from the SPX and VIX option chains), market-wide options flow (premium, call/put ratio, net premium, most active) and SPX and QQQ key levels",
       "endpoint": [
         "GET /v1/gex/levels",
@@ -483,7 +483,7 @@
     },
     {
       "name": "flow_context",
-      "section": "Intelligence tools (rolling out)",
+      "section": "Intelligence tools",
       "returns": "Today's flow read for one ticker: bull/bear split and bias, sweep counts and premium, largest recent dark-pool prints",
       "endpoint": [
         "GET /v1/chain-bull-bear/{ticker}",
