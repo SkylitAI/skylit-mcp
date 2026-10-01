@@ -103,11 +103,12 @@ def parse_tools(md: str) -> list[dict]:
     for line in md.splitlines():
         if line.startswith("## "):
             section = line[3:].strip()
-        m = re.match(r"^\| `([a-z0-9_]+)` \| (.*?) \| (.*?) \| `?(GET|POST) ([^`|]+?)`? \| ([^|]+) \|\s*$", line)
+        m = re.match(r"^\| `([a-z0-9_]+)` \| (.*?) \| (.*?) \| ((?:`?(?:GET|POST) [^`|]+`?(?: \+ )?)+) \| ([^|]+) \|\s*$", line)
         if m:
-            name, returns, _args, method, path, credits = m.groups()
+            name, returns, _args, endpoints, credits = m.groups()
+            eps = [e.strip().strip("`") for e in endpoints.split(" + ")]
             tools.append({"name": name, "section": section, "returns": returns.strip(),
-                          "endpoint": f"{method} {path.strip()}", "credits": credits.strip()})
+                          "endpoint": eps[0] if len(eps) == 1 else eps, "credits": credits.strip()})
     return tools
 
 
@@ -138,8 +139,9 @@ def readme_block(tools: list[dict]) -> str:
     for t in tools:
         groups.setdefault(t["section"], []).append(f"`{t['name']}`")
     rows = "\n".join(f"| {s} | {', '.join(names)} |" for s, names in groups.items())
-    return (f"{START}\n{len(tools)} tools, all read-only. Each wraps one Skylit REST endpoint with the same "
-            "credit cost. Full catalog with arguments and prices: "
+    return (f"{START}\n{len(tools)} tools, all read-only. Most wrap one Skylit REST endpoint with the same "
+            "credit cost; the intelligence tools combine several and are served on their own list "
+            "(`/mcp?toolset=intelligence`). Full catalog with arguments and prices: "
             "[www.skylit.ai/docs/mcp/tools](https://www.skylit.ai/docs/mcp/tools); machine-readable copy: "
             f"[reference/tools.json](reference/tools.json).\n\n| Group | Tools |\n| --- | --- |\n{rows}\n{END}")
 

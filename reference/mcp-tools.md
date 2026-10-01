@@ -160,14 +160,14 @@ Tempest's precomputed volatility modules for the symbols it covers. Tempest acce
 | --- | --- | --- | --- | --: |
 | `tempest_iv` | Constant-maturity IV (SVX) at 1d/9d/30d/3m/6m, IV rank and percentiles, ratio to the VIX, term slope and mean-reversion odds | **`symbols`** | `GET /v1/vol/iv` | 1 |
 | `tempest_term` | Implied vol per listed expiry, for contango/backwardation reads | **`symbols`** | `GET /v1/vol/term` | 1 |
-| `tempest_cones` | The 1-sigma move priced for today's close, 1 day, the week, monthly opex and 30 days, as percent and price bands | **`symbols`** | `GET /v1/vol/cones` | 1 |
+| `tempest_cones` | The 1-sigma move priced from the current price to today's close, 1 day, the week, monthly opex and 30 days, as percent and price bands, with the upside and downside moves as skew prices them and the scheduled events inside each horizon (earnings, FOMC, CPI, NFP); plus fixed day, week and month ranges priced at a past close | **`symbols`** | `GET /v1/vol/cones` | 1 |
 | `tempest_sigma` | Today's move in units of the one-day move priced at the prior close, move budget left, odds of 1- and 2-sigma days, last 60 sessions | **`symbols`** | `GET /v1/vol/sigma` | 1 |
 | `tempest_surface` | 30-day 25-delta risk reversal and butterfly, ATM vol, skew percentile, a per-symbol SKEW index and the smile per expiry | **`symbols`** | `GET /v1/vol/surface` | 3 |
 | `tempest_tilt` | One-strike-OTM call vs put imbalance (raw and forward-adjusted), the cheap side, z-score and percentile | **`symbols`** | `GET /v1/vol/tilt` | 1 |
 | `tempest_events` | Next earnings date and timing, implied event move vs past realized moves, VRP and 20-day realized vol | **`symbols`** | `GET /v1/vol/events` | 1 |
 | `tempest_snapshot` | Every Tempest module in one call (iv, term, cones, sigma, surface, tilt, events) | **`symbols`** | `GET /v1/vol/snapshot` | 5 |
 | `tempest_market` | VIX1D/9D/VIX/3M/6M, VVIX and SKEW from SPX and VIX chains, curve state and roll, regime, Mag-7 dispersion, Fear & Greed | none | `GET /v1/vol/market` | 1 |
-| `tempest_screener` | Radar: screen every covered symbol on IV rank, SVX percentiles, ratio to VIX, skew, tilt, expected move, sigma, earnings, VRP; up to 500 rows | `curve`, `filters`, `limit`, `offset`, `order`, `sector`, `sort` | `GET /v1/vol/screener` | 5 |
+| `tempest_screener` | Radar: screen every covered symbol on IV rank, SVX percentiles, ratio to VIX, skew, tilt, expected move, sigma, day pace and vol repricing, earnings, VRP; up to 500 rows | `curve`, `filters`, `limit`, `offset`, `order`, `sector`, `sort` | `GET /v1/vol/screener` | 5 |
 | `tempest_history` | One row per stored session at its close (OHLC, SVX per tenor, ATM vol, term slope, skew, tilt, chain depth), up to about two years | **`symbols`**, `fields`, `from`, `to` | `GET /v1/vol/history` | 1 per 10 symbol-weekdays in the window, min 1 (3 for 1 symbol x 1 month) |
 | `tempest_derived` | One year daily: 20-day realized vol, VRP series and percentile, the SVX30 usual-range band, earnings-eve sessions, spot-vol correlation | **`symbols`** | `GET /v1/vol/derived` | 3 |
 | `tempest_status` | When Tempest last computed, the session it belongs to, whether it is serving the frozen close, market state and coverage counts | none | `GET /v1/vol/status` | 0 |

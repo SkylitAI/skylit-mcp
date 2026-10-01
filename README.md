@@ -102,10 +102,28 @@ This repo is checked against the live API every 6 hours (`scripts/sync.py`, [syn
 "Sign in with Skylit" and "API key" reflect each client's own documentation as
 of 2026-09-30. Guides mark anything we could not confirm.
 
+## Intelligence toolset
+
+One-call answers for agents, each with a short factual `summary`, compact `data` and `meta` (cost, balance, `asOf`, `partial`). They have their own tool list, so an agent loads only these:
+
+```
+https://mcp.skylit.ai/mcp?toolset=intelligence
+```
+
+| Tool | Answers | Credits |
+| --- | --- | --: |
+| `explain_levels` | Key dealer-positioning levels for a symbol | 1 |
+| `vol_context` | Implied volatility, IV rank, expected moves, scheduled events | 2 |
+| `whats_changed` | How the positioning board moved since a given time | 6 |
+| `market_brief` | VIX complex, market-wide options flow, SPX and QQQ levels | 5 |
+| `flow_context` | Today's options flow read for a ticker | 9 |
+
+They are rolling out one at a time; a tool that is not on yet says so and is not charged. Details: [Intelligence tools](https://www.skylit.ai/docs/mcp/intelligence?utm_source=github&utm_medium=developer&utm_campaign=api_distribution&utm_content=readme).
+
 ## Tools
 
 <!-- sync:tools:start -->
-63 tools, all read-only. Each wraps one Skylit REST endpoint with the same credit cost. Full catalog with arguments and prices: [www.skylit.ai/docs/mcp/tools](https://www.skylit.ai/docs/mcp/tools?utm_source=github&utm_medium=developer&utm_campaign=api_distribution&utm_content=readme); machine-readable copy: [reference/tools.json](reference/tools.json).
+63 tools, all read-only. Most wrap one Skylit REST endpoint with the same credit cost; the intelligence tools combine several and are served on their own list (`/mcp?toolset=intelligence`). Full catalog with arguments and prices: [www.skylit.ai/docs/mcp/tools](https://www.skylit.ai/docs/mcp/tools?utm_source=github&utm_medium=developer&utm_campaign=api_distribution&utm_content=readme); machine-readable copy: [reference/tools.json](reference/tools.json).
 
 | Group | Tools |
 | --- | --- |

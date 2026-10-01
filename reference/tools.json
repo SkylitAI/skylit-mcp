@@ -355,7 +355,7 @@
     {
       "name": "tempest_cones",
       "section": "Tempest \u2014 volatility suite",
-      "returns": "The 1-sigma move priced for today's close, 1 day, the week, monthly opex and 30 days, as percent and price bands",
+      "returns": "The 1-sigma move priced from the current price to today's close, 1 day, the week, monthly opex and 30 days, as percent and price bands, with the upside and downside moves as skew prices them and the scheduled events inside each horizon (earnings, FOMC, CPI, NFP); plus fixed day, week and month ranges priced at a past close",
       "endpoint": "GET /v1/vol/cones",
       "credits": "1"
     },
@@ -404,7 +404,7 @@
     {
       "name": "tempest_screener",
       "section": "Tempest \u2014 volatility suite",
-      "returns": "Radar: screen every covered symbol on IV rank, SVX percentiles, ratio to VIX, skew, tilt, expected move, sigma, earnings, VRP; up to 500 rows",
+      "returns": "Radar: screen every covered symbol on IV rank, SVX percentiles, ratio to VIX, skew, tilt, expected move, sigma, day pace and vol repricing, earnings, VRP; up to 500 rows",
       "endpoint": "GET /v1/vol/screener",
       "credits": "5"
     },
