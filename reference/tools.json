@@ -1,6 +1,6 @@
 {
   "server": "https://mcp.skylit.ai/mcp",
-  "count": 63,
+  "count": 68,
   "tools": [
     {
       "name": "flow_search",
@@ -442,6 +442,55 @@
       "returns": "Balance in credits and US dollars, unlimited flag, and the limits that apply",
       "endpoint": "GET /v1/account",
       "credits": "0"
+    },
+    {
+      "name": "explain_levels",
+      "section": "Intelligence tools (rolling out)",
+      "returns": "Key dealer-positioning levels for one symbol: spot, King node, flip, largest positive and negative walls, net exposure, five largest levels",
+      "endpoint": "GET /v1/gex/levels",
+      "credits": "1"
+    },
+    {
+      "name": "vol_context",
+      "section": "Intelligence tools (rolling out)",
+      "returns": "30-day implied volatility, IV rank, 1-year percentile and range, curve shape, 1-sigma expected moves by horizon (from the current price), scheduled events",
+      "endpoint": [
+        "GET /v1/vol/iv",
+        "GET /v1/vol/cones"
+      ],
+      "credits": "2"
+    },
+    {
+      "name": "whats_changed",
+      "section": "Intelligence tools (rolling out)",
+      "returns": "How one symbol's board moved since an earlier instant: spot move, King node then and now, the five strikes whose net exposure changed most",
+      "endpoint": [
+        "GET /v1/historical",
+        "GET /v1/heatmap"
+      ],
+      "credits": "6"
+    },
+    {
+      "name": "market_brief",
+      "section": "Intelligence tools (rolling out)",
+      "returns": "VIX complex (computed from the SPX and VIX option chains), market-wide options flow (premium, call/put ratio, net premium, most active) and SPX and QQQ key levels",
+      "endpoint": [
+        "GET /v1/gex/levels",
+        "GET /v1/market/overview",
+        "GET /v1/vol/market"
+      ],
+      "credits": "5"
+    },
+    {
+      "name": "flow_context",
+      "section": "Intelligence tools (rolling out)",
+      "returns": "Today's flow read for one ticker: bull/bear split and bias, sweep counts and premium, largest recent dark-pool prints",
+      "endpoint": [
+        "GET /v1/chain-bull-bear/{ticker}",
+        "GET /v1/sweeps/{ticker}",
+        "GET /v1/dark-pool/top-prints/{ticker}"
+      ],
+      "credits": "9"
     }
   ]
 }

@@ -180,3 +180,15 @@ Check your balance and limits before large pulls.
 | Tool | Returns | Arguments | Endpoint | Credits |
 | --- | --- | --- | --- | --: |
 | `account_usage` | Balance in credits and US dollars, unlimited flag, and the limits that apply | none | `GET /v1/account` | 0 |
+
+## Intelligence tools (rolling out)
+
+One-call answers built from the tools above, each with a short factual `summary`, compact `data`, and `meta` (`cost`, `creditsRemaining`, `asOf`, `partial`). They are served on a separate tool list so agents that want them load only these: connect to `https://mcp.skylit.ai/mcp?toolset=intelligence`. The default `/mcp` list does not include them. They are being switched on one at a time; a tool that is not on yet answers that it is not available, at no charge. See [Intelligence tools](https://www.skylit.ai/docs/mcp/intelligence).
+
+| Tool | Returns | Arguments | Endpoint | Credits |
+| --- | --- | --- | --- | --: |
+| `explain_levels` | Key dealer-positioning levels for one symbol: spot, King node, flip, largest positive and negative walls, net exposure, five largest levels | **`symbol`**, `metric` | `GET /v1/gex/levels` | 1 |
+| `vol_context` | 30-day implied volatility, IV rank, 1-year percentile and range, curve shape, 1-sigma expected moves by horizon (from the current price), scheduled events | **`symbol`** | `GET /v1/vol/iv` + `GET /v1/vol/cones` | 2 |
+| `whats_changed` | How one symbol's board moved since an earlier instant: spot move, King node then and now, the five strikes whose net exposure changed most | **`symbol`**, **`since`**, `metric` | `GET /v1/historical` + `GET /v1/heatmap` | 6 |
+| `market_brief` | VIX complex (computed from the SPX and VIX option chains), market-wide options flow (premium, call/put ratio, net premium, most active) and SPX and QQQ key levels | none | `GET /v1/gex/levels` + `GET /v1/market/overview` + `GET /v1/vol/market` | 5 |
+| `flow_context` | Today's flow read for one ticker: bull/bear split and bias, sweep counts and premium, largest recent dark-pool prints | **`ticker`** | `GET /v1/chain-bull-bear/{ticker}` + `GET /v1/sweeps/{ticker}` + `GET /v1/dark-pool/top-prints/{ticker}` | 9 |

@@ -123,7 +123,7 @@ They are rolling out one at a time; a tool that is not on yet says so and is not
 ## Tools
 
 <!-- sync:tools:start -->
-63 tools, all read-only. Most wrap one Skylit REST endpoint with the same credit cost; the intelligence tools combine several and are served on their own list (`/mcp?toolset=intelligence`). Full catalog with arguments and prices: [www.skylit.ai/docs/mcp/tools](https://www.skylit.ai/docs/mcp/tools?utm_source=github&utm_medium=developer&utm_campaign=api_distribution&utm_content=readme); machine-readable copy: [reference/tools.json](reference/tools.json).
+68 tools, all read-only. Most wrap one Skylit REST endpoint with the same credit cost; the intelligence tools combine several and are served on their own list (`/mcp?toolset=intelligence`). Full catalog with arguments and prices: [www.skylit.ai/docs/mcp/tools](https://www.skylit.ai/docs/mcp/tools?utm_source=github&utm_medium=developer&utm_campaign=api_distribution&utm_content=readme); machine-readable copy: [reference/tools.json](reference/tools.json).
 
 | Group | Tools |
 | --- | --- |
@@ -140,6 +140,7 @@ They are rolling out one at a time; a tool that is not on yet says so and is not
 | Heatseeker — gamma/vanna heatmaps | `heat_heatmap`, `heat_levels`, `heat_historical_heatmap`, `heat_stats_daily`, `heat_symbols` |
 | Tempest — volatility suite | `tempest_iv`, `tempest_term`, `tempest_cones`, `tempest_sigma`, `tempest_surface`, `tempest_tilt`, `tempest_events`, `tempest_snapshot`, `tempest_market`, `tempest_screener`, `tempest_history`, `tempest_derived`, `tempest_status`, `tempest_symbols` |
 | Account | `account_usage` |
+| Intelligence tools (rolling out) | `explain_levels`, `vol_context`, `whats_changed`, `market_brief`, `flow_context` |
 <!-- sync:tools:end -->
 
 Tempest tools depend on your plan; without access they return `not_entitled`
