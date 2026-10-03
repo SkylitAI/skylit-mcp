@@ -57,6 +57,12 @@ info:
     `X-RateLimit-Reset`. `429`s from the API itself (concurrency and stream
     limits) carry `Retry-After`.
 
+    **Attribution.** Every response carries
+    `X-Skylit-Attribution: Data: Skylit (https://skylit.ai/?utm_source=api&utm_medium=attribution)`, JSON success
+    responses carry `meta.attribution`, and `/v1/stream`'s `connected` event
+    carries the same object. When you share or publish Skylit data, credit
+    "Data: Skylit" (https://www.skylit.ai/api-terms#attribution).
+
     **Symbols.** Multi-symbol routes take at most 10 distinct symbols per
     request; more is a `400` `invalid_parameter` (never silently truncated).
     Unknown symbols in a list are omitted from `data.symbols`; if none of the
@@ -125,9 +131,12 @@ paths:
       description: |
         Current per-strike heatmap for one or more symbols at the latest
         snapshot. Includes the live `velocityPct` per strike. Pass multiple
-        comma-separated symbols for a single cross-asset (Trinity) call, and
+        comma-separated symbols for a single cross-asset call (the app's
+        Trinity is `SPXW,SPY,QQQ`; `SPX` is the monthlies only), and
         `expirations` to net each strike over specific expiration dates instead
-        of the nearest `maxExpirations`.
+        of the nearest `maxExpirations`. A call that cannot finish within 20
+        seconds answers `504` `gateway_timeout` (refunded); retry, or request
+        fewer symbols.
       parameters:
         - $ref: "#/components/parameters/Symbols"
         - $ref: "#/components/parameters/Metric"
@@ -199,6 +208,7 @@ paths:
         "404": { $ref: "#/components/responses/NotFound" }
         "429": { $ref: "#/components/responses/RateLimited" }
         "503": { $ref: "#/components/responses/Unavailable" }
+        "504": { $ref: "#/components/responses/GatewayTimeout" }
 
   /v1/historical:
     get:
@@ -539,6 +549,9 @@ paths:
         positive and negative strikes (the walls), and the flip level where
         cumulative net exposure changes sign. It is computed from the strikes
         this request returned, so widen `maxStrikes` for a wider view.
+
+        A call that cannot finish within 20 seconds answers `504`
+        `gateway_timeout` (refunded); retry, or request fewer symbols.
       tags: [Heatmap]
       parameters:
         - $ref: "#/components/parameters/Symbols"
@@ -584,6 +597,7 @@ paths:
         "404": { $ref: "#/components/responses/NotFound" }
         "429": { $ref: "#/components/responses/RateLimited" }
         "503": { $ref: "#/components/responses/Unavailable" }
+        "504": { $ref: "#/components/responses/GatewayTimeout" }
   /v1/account:
     get:
       operationId: getAccount
@@ -632,18 +646,29 @@ paths:
       summary: Daily statistics per symbol (ranking and spot range)
       tags: [Heatmap]
       description: |
-        Per symbol and UTC date: board spot open/high/low/close, the smallest
-        and largest single cell of the day, and the mean and maximum over the
-        day's frames of `max(|smallest cell|, |largest cell|)` (a measure of
-        how concentrated the exposure is, useful for ranking a universe).
-        Computed from 1-minute history, so every frame of a day is one minute
+        Per symbol and US trading session (ET): board spot open/high/low/close,
+        the smallest and largest single cell of the session, and the mean and
+        maximum over the session's frames of `max(|smallest cell|, |largest cell|)`
+        (a measure of how concentrated the exposure is, useful for ranking a
+        universe). Computed from 1-minute history, so every frame is one minute
         apart (`frames` counts them). Weight `peakAbsMean` by `frames` to
-        average across days. Today's row has `complete: false` and changes as
-        the session goes on.
+        average across days.
 
-        Up to 50 symbols, 31 days and 400 symbol-days (symbols x days) per
-        call. Days with no data are omitted; a symbol with none is omitted.
-        Served from the historical file store. **Cost:** 5 credits per call.
+        **Sessions.** `date` is the ET session date. By default a row covers
+        the regular session, 09:30-16:00 ET (frames stamped 09:30 up to
+        15:59); `extended=true` covers 04:00-20:00 ET instead, including
+        pre- and post-market. Weekends and NYSE market holidays have no
+        session and no row, including for indices whose heatmap updates
+        around the clock (SPX, SPXW, NDX, VIX). On early-close days the
+        session simply has fewer frames. `firstAt`/`lastAt` are UTC
+        timestamps. Today's row has `complete: false` until 30 minutes after
+        the session ends, and changes as the session goes on.
+
+        Up to 50 symbols, 31 calendar days and 400 symbol-sessions (symbols x
+        trading days) per call. Sessions with no data are omitted; a symbol
+        with none is omitted. Served from the historical file store; finished
+        sessions are cached, so repeat and overlapping calls are fast.
+        **Cost:** 5 credits per call.
       parameters:
         - name: symbols
           in: query
@@ -653,13 +678,18 @@ paths:
         - name: from
           in: query
           required: true
-          description: First UTC date (`YYYY-MM-DD`), not before 2023-03-28.
+          description: First session date (`YYYY-MM-DD`, ET), not before 2023-03-28.
           schema: { type: string, format: date }
         - name: to
           in: query
           required: false
-          description: Last UTC date (`YYYY-MM-DD`), inclusive. Default today; at most 31 days after `from`.
+          description: Last session date (`YYYY-MM-DD`, ET), inclusive. Default today (ET); at most 31 calendar days after `from`.
           schema: { type: string, format: date }
+        - name: extended
+          in: query
+          required: false
+          description: Cover the extended session (04:00-20:00 ET) instead of the regular session (09:30-16:00 ET).
+          schema: { type: boolean, default: false }
         - $ref: "#/components/parameters/Metric"
       responses:
         "200":
@@ -790,6 +820,15 @@ paths:
         The symbol's implied-volatility term structure: one row per listed expiry
         used (days to expiry and the implied vol there), for contango/backwardation
         reads. The headline slope and curve state are in `/v1/vol/iv`.
+        Optional `term.earnings_context` describes scheduled earnings exposure in the
+        calendar-day 9-day and 30-day readings. `overlap_9d` and `overlap_30d` are
+        `none` (before the known report), `partial` (spans the report), `full`
+        (includes it), or null (unavailable). A report beyond nine days can already
+        overlap the 9-day reading. This does not attribute premium or predict a flip.
+        `date` and `timing` (`bmo` / `amc`) describe the recorded report, which can
+        change; `within_9d` is nullable. `status` is `scheduled`, `limited`,
+        `calendar_unavailable`, `no_report`, `timing_unknown`, or `report_passed`.
+        Missing fields and nulls must not be treated as `none`.
         Response: `data.symbols[]` has `symbol`, `asOf`, `sessionDate`, `stale` and `term`.
         Symbols Tempest does not cover are listed in `data.missing`. **Cost:** 1 credit per call (up to 10 symbols).
       parameters:
@@ -824,6 +863,39 @@ paths:
         around spot (from implied variance), plus the level set drawn on the
         chart. A horizon that does not exist at that moment (the `close`
         horizon after hours) is null.
+        **Two different questions.** `horizons[]` is priced from the current
+        spot: how much further options price the move from *now* to each
+        settle. It moves with price, so it is not a budget to measure a move
+        against. `levels[]` is priced at a past close and does not move
+        intraday: read how far a move has gone against `hi1` / `lo1` (1-sigma)
+        and `hi2` / `lo2` (2-sigma).
+
+        **Levels** (`levels[]`): `day` (the prior close, to today's close),
+        `week` (last week's final close, to this week's last close) and `month`
+        (the last monthly options expiration's close, to the next monthly
+        expiration's close). Each has `name`, `label`, `anchor`, `priced_at`,
+        `until`, `em1_pct` and `hi1`/`lo1`/`hi2`/`lo2`. A level is absent when
+        its anchor close has no reading.
+
+        **Per horizon** (`horizons[]`): `name`, `minutes` to the settle,
+        `em1_pct` (1-sigma, % of spot), `em1` / `em2` (1- and 2-sigma in price),
+        `realized_em_pct` (20-day realized vol over the same span). Optional,
+        null when not available, and absent on older readings:
+        - `up1_pct`, `dn1_pct`, `up2_pct`, `dn2_pct`: the move to each side in %
+          of spot as the options' skew prices it (put skew makes the downside
+          wider). Null: read `em1_pct` both ways.
+        - `tail_src`: how the 2-sigma sides were read: `quantile` (from the
+          fitted smile, within the quoted strikes) or `wing` (twice the 1-sigma
+          side, which understates a steep tail).
+        - `skew_expiry`: the expiration whose smile set that shape.
+        - `events[]`: scheduled events inside the horizon (after `asOf`, at or
+          before the settle), each `{kind, label, at, timing, jump_pct,
+          var_share}`: `kind` is `earnings`, `fomc`, `cpi` or `nfp`; `at` is the
+          ISO-8601 instant it is modelled at; earnings add `timing` (`bmo` /
+          `amc`), `jump_pct` (the report's own implied move, %) and `var_share`
+          (the share of the horizon's priced variance that is the report, 0-1).
+        - `event_adjusted`: true when this horizon's move includes an earnings
+          report.
         Response: `data.symbols[]` has `symbol`, `asOf`, `sessionDate`, `stale` and `cones`.
         Symbols Tempest does not cover are listed in `data.missing`. **Cost:** 1 credit per call (up to 10 symbols).
       parameters:
@@ -954,6 +1026,8 @@ paths:
       summary: Event (earnings) implied move and VRP per symbol
       tags: [Tempest]
       description: |
+        Optional `events.earnings_context` carries the same scheduled-exposure metadata
+        documented on `/v1/vol/term`; it is not an earnings-premium estimate.
         Tempest Catalyst: the next earnings date and timing, the move priced into it
         (`implied_move_pct`, from the implied-variance term structure across the event;
         null when only a straddle estimate exists, `estimate: true`), the median and mean past earnings moves and how the
@@ -1047,6 +1121,9 @@ paths:
       summary: Screen the whole Tempest universe (Radar)
       tags: [Tempest]
       description: |
+        Rows can include `earnings_overlap_9d` and `earnings_overlap_30d`, with
+        `none`, `partial`, `full`, or null as documented on `/v1/vol/term`.
+        These are optional calendar-day exposure labels, not forecast signals.
         Tempest Radar: one row per covered symbol with its headline readings
         (SVX term and percentiles, IV rank, ratio to VIX, term slope, skew,
         tilt, expected move, running sigma and odds, next event and VRP,
@@ -1064,7 +1141,12 @@ paths:
             term_slope, rr25_30, skew_pct_1y, tilt_21, tilt_z, tilt_pct_1y,
             em_1d_pct, running_sigma, sigma_odds_pct, expected_vrp,
             event_move_pct, days_to_event, opt_vol, spot, spot_vol_corr,
-            cheap_from_low_pct.
+            cheap_from_low_pct, day_pace, day_reprice.
+            `day_pace` is today's move against the priced one-day move for the
+            time elapsed, in sigma; `day_reprice` is the one-day range options
+            price now over what they priced at the prior close for the rest of
+            the day (above 1: implied vol bid). Both are null outside regular
+            hours.
           schema: { type: string, default: svx30 }
         - name: order
           in: query
@@ -1243,8 +1325,9 @@ paths:
       description: |
         Pushes a symbol's full module state each time Tempest recomputes it:
         about every minute for the most active names and every ~10 minutes for
-        the rest during regular hours; nothing outside them (the close state
-        stays frozen). Events: `connected`, `vol` (id = asOf in epoch ms; data
+        the rest during regular hours. Quote readings stay frozen after close;
+        calendar or availability updates can still push a full state with the
+        same quote timestamp and event ID. Events: `connected`, `vol` (id = asOf in epoch ms; data
         is a `data.symbols[]` element of `/v1/vol/snapshot`), `market` (with
         `market=true`), `credits`, `closed`, `reconnect` (after an hour).
         Resume with `Last-Event-ID` (or `lastEventId`): the initial burst skips
@@ -1319,13 +1402,21 @@ components:
       required: true
       description: |
         One ticker, or a comma-separated list for a single cross-asset call
-        (e.g. `SPY` or `SPY,SPX,QQQ`). Each is returned as an element of
+        (e.g. `SPY` or `SPXW,SPY,QQQ`). Each is returned as an element of
         `data.symbols`. At most 10 distinct symbols (more → `400`
         `invalid_parameter`). Unknown symbols in a list are omitted; if none
         is available → `404` `symbol_not_found`.
+
+        Index options are served per option root, and the roots hold
+        different contracts. `SPXW` is the PM-settled S&P 500 options (every
+        daily and weekly expiration, 0DTE included), the board the Skylit
+        app's Trinity view uses. `SPX` is only the AM-settled monthlies, so
+        it has no 0DTE or weekly gamma and reads very differently from
+        `SPXW`. The same split applies to `NDXP` / `NDX` and `RUTW` / `RUT`.
+        To match the app's Trinity or read 0DTE, request `SPXW,SPY,QQQ`.
       schema:
         type: string
-        example: SPY,SPX,QQQ
+        example: SPXW,SPY,QQQ
     Metric:
       name: metric
       in: query
@@ -1522,6 +1613,43 @@ components:
           example: "1s"
         mode: { type: string, enum: [live, historical] }
         cached: { type: boolean, description: True if served from the in-process cache. }
+        delayed:
+          type: boolean
+          description: |
+            True when your plan's data is delayed and this latest-data request
+            was served as of `delayMinutes` ago (mode is then `historical`).
+            Absent on real-time plans.
+        delayMinutes: { type: integer, description: The delay applied when `delayed` is true. }
+        attribution:
+          allOf: [{ $ref: "#/components/schemas/Attribution" }]
+          description: |
+            How to credit this data. Most routes send the short form
+            `{text, url, terms}` ("Data: Skylit"). Routes whose data class the
+            licensing design (TERMS.md §5) tags explicitly — today,
+            `/v1/options/*` — send the full licensing shape instead. Can be
+            absent; do not infer sharing rules from the short form or from
+            its absence.
+
+    Attribution:
+      type: object
+      required: [text, url]
+      description: |
+        Whether and how this response's data may be published. See
+        `/legal/api#sharing`. An Agent or MCP client should never publish
+        data where `shareable` is false, regardless of `shareClass`.
+        `required`, `license`, `shareable` and `shareClass` are always sent
+        on `/v1/options/*` and absent from the short form.
+      properties:
+        text: { type: string, example: "Powered by Skylit" }
+        url: { type: string, format: uri }
+        required: { type: boolean }
+        license: { type: string, enum: [personal, commercial, connected_app] }
+        shareable: { type: boolean }
+        shareClass:
+          type: string
+          enum: [derived, derived_levels_only, raw]
+          description: "\"raw\" (e.g. option quotes, greeks) must never be auto-published."
+        terms: { type: string, format: uri }
 
     SymbolRange:
       type: object
@@ -1563,9 +1691,9 @@ components:
       type: object
       required: [date, frames, complete, firstAt, lastAt, spotOpen, spotHigh, spotLow, spotClose, minValue, maxValue, peakAbsMean, peakAbsMax]
       properties:
-        date: { type: string, format: date }
-        frames: { type: integer, description: 1-minute frames the day's values are computed from. }
-        complete: { type: boolean, description: False for a day still in progress (today). }
+        date: { type: string, format: date, description: "The trading session's date (ET)." }
+        frames: { type: integer, description: 1-minute frames inside the session the values are computed from. }
+        complete: { type: boolean, description: False for a session still in progress (today) or ended less than 30 minutes ago. }
         firstAt: { type: string, format: date-time }
         lastAt: { type: string, format: date-time }
         spotOpen: { type: number }
@@ -1588,6 +1716,7 @@ components:
         frozen: { type: boolean, description: "True while Tempest serves the previous close (outside regular hours)." }
         publishedAt: { type: string, format: date-time, description: "When Tempest last published to the API." }
         cached: { type: boolean }
+        attribution: { $ref: "#/components/schemas/Attribution" }
     VolMissing:
       type: object
       required: [symbol, reason]

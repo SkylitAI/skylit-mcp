@@ -36,11 +36,21 @@ info:
     `X-RateLimit-Reset`. `429`s from the API itself (concurrency and stream
     limits) carry `Retry-After`.
 
+    **Query budget.** Requests that must run a fresh query (anything not
+    answered from a cached or precomputed result) share a per-account budget
+    across all servers: a cap on queries running at once and on fresh queries
+    per second. Over it the API answers at once with `429`
+    `TOO_MANY_CONCURRENT_QUERIES` or `RATE_LIMITED` and `Retry-After: 1`; the
+    request is not queued and not charged. Cached answers never count. To read
+    a whole day, follow `meta.nextCursor` (see `/v1/flow/{ticker}`) instead of
+    splitting the time window: one request per page, no overlap.
+
     **Credits & billing.** Every `/v1/*` data request debits a fixed number of
     **credits** from your account's shared Skylit balance (the same balance used
     across all Skylit public APIs). Each chargeable response carries
     `X-Credits-Remaining: <balance>`. Credits are charged before the request
-    is served and refunded when it fails (any `4xx` or `5xx`). Cost is priced
+    is served and refunded when it fails (any `4xx` or `5xx`, or a `200`
+    with an empty body). Cost is priced
     by server-side work and data volume returned:
 
     | Tier | Credits | Routes |
@@ -172,6 +182,31 @@ paths:
         requested timeframe, each scored on Skylit's directional Flow Score
         (-100 → +100) and conviction-weighted FlowBonus. The response also
         includes timeframe-level VWF / SDF / FIR aggregates.
+
+        **Paging.** Trades come newest first. When a page is full (`limit`
+        rows read), `meta.nextCursor` is set: pass it back as `cursor` with the
+        same filters to get the next, older page. It resumes exactly after the
+        last row, so no trade is skipped or repeated, even when several share
+        one nanosecond timestamp. No `nextCursor` means you have reached the
+        start of the window; a `cursor` page with no trades returns `200` with
+        an empty `trades` array. `min_flow_score`, `min_flow_bonus` and
+        `min_rvol` filter after the read, so a page can hold fewer than
+        `limit` trades while `nextCursor` is still set: keep following it.
+        `meta.nextEndTime` is the last row's exact time (nanoseconds) for
+        clients that page with `end_time`; it is inclusive, so trades at that
+        instant can repeat. Prefer `cursor`.
+
+        **Backfilling a day** for one contract, 500 trades per request:
+
+            GET /v1/flow/SPY?date=2026-09-30&expiration=2026-09-30&min_strike=660&max_strike=660&option_type=call&limit=500
+            → meta.nextCursor = "dDEuMTc5..."
+            GET /v1/flow/SPY?date=2026-09-30&expiration=2026-09-30&min_strike=660&max_strike=660&option_type=call&limit=500&cursor=dDEuMTc5...
+            → repeat until meta.nextCursor is absent
+
+        Each page costs one request. Splitting the window around the 500-row
+        limit instead (bisecting) re-reads overlapping ranges, spends the
+        account's query budget several times over, and gets an
+        `X-Skylit-Hint` response header pointing here.
       parameters:
         - $ref: "#/components/parameters/Ticker"
         - $ref: "#/components/parameters/Timeframe"
@@ -180,6 +215,13 @@ paths:
           required: false
           description: Max trades returned. Server caps this at 500.
           schema: { type: integer, default: 100, minimum: 1, maximum: 500 }
+        - name: cursor
+          in: query
+          required: false
+          description: |
+            `meta.nextCursor` from the previous page, passed back unchanged with
+            the same filters. Opaque; an invalid value returns `400`.
+          schema: { type: string }
         - name: min_premium
           in: query
           required: false
@@ -309,6 +351,12 @@ paths:
             X-Credits-Remaining:
               description: Credit balance remaining after this request was charged.
               schema: { type: integer }
+            X-Skylit-Hint:
+              description: |
+                Informational, sometimes present: `use next_cursor (<docs link>)`
+                when this account sent several overlapping time windows for the
+                same filters within seconds. The response itself is unaffected.
+              schema: { type: string }
           content:
             application/json:
               schema: { $ref: "#/components/schemas/FlowSuccess" }
@@ -709,6 +757,274 @@ paths:
         "429": { $ref: "#/components/responses/RateLimited" }
         "500": { $ref: "#/components/responses/InternalError" }
         "503": { $ref: "#/components/responses/Unavailable" }
+        "504": { $ref: "#/components/responses/GatewayTimeout" }
+
+  /v1/flow/stream:
+    get:
+      summary: Live cross-ticker options flow (Server-Sent Events)
+      operationId: streamFlow
+      x-credits: 1
+      x-credits-per-minute: 1
+      tags: [Flow]
+      description: |
+        A long-lived `text/event-stream` carrying options trades as they
+        print, across every ticker unless you filter. This is the same feed
+        that drives the Skylit website, with the same filter semantics.
+
+        ### Live only
+
+        The stream carries trades that arrive **after** you connect; it
+        replays no history. Load a backlog from `/v1/flow/{ticker}` first if
+        you need one, then attach here. `limit` is rejected with `400` rather
+        than silently ignored.
+
+        ### Pricing
+
+        Costs differ from one-shot routes because they accrue over time:
+
+        - **1 credit on connect**, charged before the stream opens — an
+          under-funded client gets a clean `402`, not a stream that dies
+          immediately.
+        - **1 credit per minute open**, reported back as a `credits` event.
+        - **5 concurrent streams per account**; a sixth gets `429`.
+        - **1 hour maximum**, then a `reconnect` event and a clean close.
+
+        ### Filter names
+
+        This endpoint uses the live-feed filter vocabulary, which differs
+        from the curated parameters on `/v1/flow/{ticker}`: use
+        `show_calls`/`show_puts` rather than `option_type`, and
+        `min_size`/`max_size` rather than `min_contracts`/`max_contracts`.
+
+        ### Events
+
+        | Event | Payload | Meaning |
+        |---|---|---|
+        | `connected` | stream terms | First frame after the stream opens. |
+        | `trade` | trade object | A trade that passed your filters. Flags `sweep_trade`, `multi_leg` and `cross_trade` are always present. |
+        | `credits` | `{"remaining": N}` | Emitted each minute after billing. |
+        | `lagged` | `{"dropped": N}` | You read slower than the tape; trades were skipped. |
+        | `closed` | `{"reason": "..."}` | Terminal. `insufficient_credits`, `account_suspended`, `credit_check_failed`, or `feed_unavailable`. |
+        | `reconnect` | `{"reason": "max_duration"}` | Terminal after 1h; reconnect to continue. |
+
+        A `:` comment arrives every 30s as a proxy keepalive. Treat a stalled
+        stream as a reconnect signal.
+
+        ### Example
+
+        ```
+        curl -N -H "Authorization: Bearer $SKYLIT_API_KEY" \
+          "https://flow-api.skylit.ai/v1/flow/stream?min_premium=100000&show_puts=false"
+        ```
+
+        `-N` matters: without it curl buffers the response and the stream
+        appears to hang.
+      parameters:
+        - name: ticker
+          in: query
+          required: false
+          description: |
+            Comma-separated tickers to include (e.g. `AAPL,NVDA`, max 50).
+            Omit to stream every ticker.
+          schema: { type: string }
+        - name: exclude_ticker
+          in: query
+          required: false
+          description: Comma-separated tickers to exclude.
+          schema: { type: string }
+        - name: min_premium
+          in: query
+          required: false
+          description: |
+            Minimum premium per trade (USD). Strongly recommended — an
+            unfiltered stream carries the entire tape.
+          schema: { type: number, format: double, example: 100000 }
+        - name: max_premium
+          in: query
+          required: false
+          description: Maximum premium per trade (USD).
+          schema: { type: number, format: double }
+        - name: min_size
+          in: query
+          required: false
+          description: Minimum contracts per trade.
+          schema: { type: integer, minimum: 0 }
+        - name: max_size
+          in: query
+          required: false
+          description: Maximum contracts per trade.
+          schema: { type: integer, minimum: 0 }
+        - name: show_calls
+          in: query
+          required: false
+          description: Include calls.
+          schema: { type: boolean, default: true }
+        - name: show_puts
+          in: query
+          required: false
+          description: Include puts.
+          schema: { type: boolean, default: true }
+        - name: show_below_bid
+          in: query
+          required: false
+          description: |
+            Include prints below the bid. The five side toggles are
+            independent buckets: `show_bid` covers exact-bid prints,
+            `show_ask` exact-ask, and the aggressive variants are gated by
+            their own toggles.
+          schema: { type: boolean, default: true }
+        - name: show_bid
+          in: query
+          required: false
+          description: Include prints at the bid.
+          schema: { type: boolean, default: true }
+        - name: show_mid
+          in: query
+          required: false
+          description: Include prints at the mid.
+          schema: { type: boolean, default: true }
+        - name: show_ask
+          in: query
+          required: false
+          description: Include prints at the ask.
+          schema: { type: boolean, default: true }
+        - name: show_above_ask
+          in: query
+          required: false
+          description: Include prints above the ask.
+          schema: { type: boolean, default: true }
+        - name: min_dte
+          in: query
+          required: false
+          description: Minimum days to expiration.
+          schema: { type: integer }
+        - name: max_dte
+          in: query
+          required: false
+          description: Maximum days to expiration.
+          schema: { type: integer }
+        - name: only_0dte
+          in: query
+          required: false
+          description: Restrict to contracts expiring today.
+          schema: { type: boolean, default: false }
+        - name: min_oi
+          in: query
+          required: false
+          description: Minimum open interest on the contract.
+          schema: { type: integer, minimum: 0 }
+        - name: max_oi
+          in: query
+          required: false
+          description: Maximum open interest on the contract.
+          schema: { type: integer, minimum: 0 }
+        - name: min_vol_oi
+          in: query
+          required: false
+          description: Minimum volume/open-interest ratio.
+          schema: { type: number, format: double }
+        - name: max_vol_oi
+          in: query
+          required: false
+          description: Maximum volume/open-interest ratio.
+          schema: { type: number, format: double }
+        - name: min_iv
+          in: query
+          required: false
+          description: Minimum implied volatility (decimal, e.g. `0.42`).
+          schema: { type: number, format: double }
+        - name: max_iv
+          in: query
+          required: false
+          description: Maximum implied volatility (decimal).
+          schema: { type: number, format: double }
+        - name: only_sweeps
+          in: query
+          required: false
+          description: Restrict to multi-exchange sweeps.
+          schema: { type: boolean, default: false }
+        - name: only_crosses
+          in: query
+          required: false
+          description: |
+            Restrict to pre-negotiated crosses. These carry no aggressor
+            information, so `side` is not meaningful on them.
+          schema: { type: boolean, default: false }
+        - name: only_multi_leg
+          in: query
+          required: false
+          description: Restrict to legs of multi-leg strategies.
+          schema: { type: boolean, default: false }
+        - name: exclude_multi_leg
+          in: query
+          required: false
+          description: Exclude multi-leg legs, leaving outright trades.
+          schema: { type: boolean, default: false }
+        - name: min_flow_score
+          in: query
+          required: false
+          description: Minimum directional Flow Score (-100 → +100).
+          schema: { type: integer, minimum: -100, maximum: 100 }
+        - name: max_flow_score
+          in: query
+          required: false
+          description: Maximum directional Flow Score.
+          schema: { type: integer, minimum: -100, maximum: 100 }
+        - name: abs_min_flow_score
+          in: query
+          required: false
+          description: |
+            Minimum absolute Flow Score — conviction in either direction.
+          schema: { type: integer, minimum: 0, maximum: 100 }
+        - name: min_percentile
+          in: query
+          required: false
+          description: |
+            Minimum premium percentile for the ticker. Trades with no
+            computed percentile are excluded once this is set.
+          schema: { type: integer, enum: [0, 50, 75, 90, 95, 99] }
+        - name: show_stocks
+          in: query
+          required: false
+          description: Include single-stock underlyings.
+          schema: { type: boolean, default: true }
+        - name: show_etf
+          in: query
+          required: false
+          description: Include ETF underlyings.
+          schema: { type: boolean, default: true }
+        - name: show_indices
+          in: query
+          required: false
+          description: Include index underlyings.
+          schema: { type: boolean, default: true }
+      responses:
+        "200":
+          description: |
+            An open SSE stream. Frames are newline-delimited
+            `event:`/`data:` pairs as described above.
+          content:
+            text/event-stream:
+              schema: { type: string }
+        "400":
+          description: |
+            An unsupported parameter was supplied — `limit` is not valid on
+            the stream.
+          content:
+            application/json:
+              schema: { $ref: "#/components/schemas/Error" }
+        "401": { $ref: "#/components/responses/Unauthorized" }
+        "403": { $ref: "#/components/responses/Forbidden" }
+        "402": { $ref: "#/components/responses/InsufficientCredits" }
+        "429":
+          description: |
+            Either the account's request rate limit, or its cap of 5
+            concurrent streams (`stream_limit_reached`).
+          content:
+            application/json:
+              schema: { $ref: "#/components/schemas/Error" }
+        "503": { $ref: "#/components/responses/Unavailable" }
+        "404": { $ref: "#/components/responses/NotFound" }
         "504": { $ref: "#/components/responses/GatewayTimeout" }
 
   /v1/sweeps/{ticker}:
@@ -1567,11 +1883,20 @@ paths:
             Trailing window covered by the bars (e.g. `1D`, `7D`, `30D`).
             At most `30D` with an intraday bucket, `365D` with `1d`/`1w`.
             Priced by range: 3 credits per started 30 days.
+            N counts **trading days** (weekends and market holidays are
+            skipped), ending with the current or latest session.
           schema: { type: string, example: "1D" }
         - in: query
           name: bucket
           required: true
-          description: Bucket size.
+          description: |
+            Bucket size. Every bucket in the window is returned, zero-filled
+            when nothing traded, so the response grows with window / bucket:
+            `1min` over `30D` is about 11,700 bars (390 per session), a
+            multi-megabyte response. For windows over about 20 trading days,
+            use `5min` or coarser.
+            Retention: `1min`-`30min` cover the last 365 days; `1d` and `1w`
+            go back to 2023-03-27.
           schema:
             type: string
             enum: [1min, 5min, 10min, 15min, 30min, 1d, 1w]
@@ -2388,10 +2713,20 @@ paths:
             Trailing window — `{N}D` where N is 1–365 (e.g. `1D`, `7D`).
             At most `30D` with an intraday bucket. Priced by range: 3 credits
             per started 30 days.
+            N counts **trading days** (weekends and market holidays are
+            skipped), ending with the current or latest session.
           schema: { type: string, example: "1D" }
         - in: query
           name: bucket
           required: true
+          description: |
+            Bucket size. Every bucket in the window is returned, zero-filled
+            when nothing traded, so the response grows with window / bucket:
+            `1min` over `30D` is about 11,700 bars (390 per session), a
+            multi-megabyte response. For windows over about 20 trading days,
+            use `5min` or coarser.
+            Retention: `1min`-`30min` cover the last 365 days; `1d` and `1w`
+            go back to 2023-03-27.
           schema:
             type: string
             enum: [1min, 5min, 10min, 15min, 30min, 1d, 1w]
@@ -2422,8 +2757,21 @@ paths:
         scoped to a single OPRA contract. Because the contract is fixed,
         chain-level filters (moneyness, strike, DTE, expiration) do not
         apply here.
+
+        **Paging.** Trades come largest premium first. When a page is full,
+        `meta.nextCursor` is set: pass it back as `cursor` with the same
+        `start`, `end` and filters for the next page. No gaps or repeats; no
+        `nextCursor` means the window is exhausted. Splitting the time window
+        instead re-reads overlapping ranges and gets an `X-Skylit-Hint`
+        response header.
       parameters:
         - $ref: "#/components/parameters/OptionSymbol"
+        - in: query
+          name: cursor
+          description: |
+            `meta.nextCursor` from the previous page, passed back unchanged with
+            the same filters. Opaque; an invalid value returns `400`.
+          schema: { type: string }
         - in: query
           name: start
           description: Lower time bound — RFC 3339 or Unix seconds. Defaults to start-of-trading-day.
@@ -2567,10 +2915,21 @@ paths:
         Server-side filtered dark-pool prints from the off-exchange tape
         (FINRA TRF, publisher FINN/FINC). Defaults to **today (ET)** with a
         **$1,000,000** minimum notional (the blocks-by-default rule); pass
-        `min_notional=0` for the full firehose. The trade-date span is capped
-        at **31 days** per request — page with `limit`/`offset` or narrow the
-        range for more. Prints carry **no side, BBO, or greeks**. Pagination
-        state (`limit`, `offset`, `count`, `hasMore`) is returned in `meta`.
+        `min_notional=0` for every print of the requested `tickers`. Requests
+        without `tickers` need `min_notional` of at least **100,000**. The
+        trade-date span is capped at **31 days** per request. Prints carry
+        **no side, BBO, or greeks**.
+
+        **Paging.** Follow `meta.nextCursor` (pass it back as `cursor` with the
+        same filters) to walk any number of prints without gaps or repeats,
+        even while new prints arrive. `order=asc` always returns a cursor, so
+        repeating the last call picks up prints reported since. `offset`
+        (max 50,000) still works for short scrolls; it cannot be combined with
+        `cursor`.
+
+        **Polling.** `after` / `before` bound the trade time exactly (ISO-8601
+        or epoch nanoseconds), and set the trade-date range when no `date`
+        parameter is given.
       parameters:
         - name: tickers
           in: query
@@ -2670,8 +3029,30 @@ paths:
         - name: order
           in: query
           required: false
-          description: Sort by trade time.
+          description: Direction of `sort`.
           schema: { type: string, enum: [asc, desc], default: desc }
+        - name: sort
+          in: query
+          required: false
+          description: |
+            `time` (default), `notional` or `size`. Largest-first ranking
+            (`sort=notional`) is paged with `offset`; `nextCursor` is time-only.
+          schema: { type: string, enum: [time, notional, size], default: time }
+        - name: cursor
+          in: query
+          required: false
+          description: "`meta.nextCursor` from the previous page (time sort only)."
+          schema: { type: string }
+        - name: after
+          in: query
+          required: false
+          description: Only prints strictly after this instant (ISO-8601 or epoch nanoseconds).
+          schema: { type: string, example: "2026-09-28T14:30:00Z" }
+        - name: before
+          in: query
+          required: false
+          description: Only prints strictly before this instant (ISO-8601 or epoch nanoseconds).
+          schema: { type: string, example: "2026-09-28T20:00:00Z" }
       responses:
         "200":
           description: Paginated dark-pool prints for the requested filters.
@@ -2723,6 +3104,152 @@ paths:
           content:
             application/json:
               schema: { $ref: "#/components/schemas/DarkPoolTopPrintsSuccess" }
+        "400": { $ref: "#/components/responses/BadRequest" }
+        "401": { $ref: "#/components/responses/Unauthorized" }
+        "403": { $ref: "#/components/responses/Forbidden" }
+        "404": { $ref: "#/components/responses/NotFound" }
+        "402": { $ref: "#/components/responses/InsufficientCredits" }
+        "429": { $ref: "#/components/responses/RateLimited" }
+        "500": { $ref: "#/components/responses/InternalError" }
+        "503": { $ref: "#/components/responses/Unavailable" }
+        "504": { $ref: "#/components/responses/GatewayTimeout" }
+
+  /v1/dark-pool/levels/{ticker}:
+    get:
+      summary: Dark-pool volume by price level
+      operationId: getDarkPoolLevels
+      x-credits: 3
+      tags: [Dark Pool]
+      description: |
+        Off-exchange shares and notional traded at each price bucket for
+        `{ticker}` over a window, largest first. Levels where dark-pool volume
+        concentrated are commonly read as support and resistance. Defaults to
+        the last 30 calendar days and a bucket near 0.1% of the window's VWAP.
+      parameters:
+        - $ref: "#/components/parameters/Ticker"
+        - name: date_start
+          in: query
+          required: false
+          description: Inclusive start date (`YYYY-MM-DD`). Replaces `lookback_days`. Max span 180 days.
+          schema: { type: string, format: date }
+        - name: date_end
+          in: query
+          required: false
+          description: Inclusive end date (`YYYY-MM-DD`). Defaults to today (ET).
+          schema: { type: string, format: date }
+        - name: lookback_days
+          in: query
+          required: false
+          description: Calendar days back from `date_end`.
+          schema: { type: integer, default: 30, minimum: 1, maximum: 180 }
+        - name: bucket
+          in: query
+          required: false
+          description: Price bucket width in USD. Omit for automatic (a power of ten near 0.1% of VWAP).
+          schema: { type: number, format: double, minimum: 0.01, example: 0.5 }
+        - name: sort
+          in: query
+          required: false
+          description: Ranking of the returned levels, largest first.
+          schema: { type: string, enum: [notional, shares, prints, block_notional], default: notional }
+        - name: limit
+          in: query
+          required: false
+          schema: { type: integer, default: 50, minimum: 1, maximum: 500 }
+      responses:
+        "200":
+          description: Price levels for `{ticker}`, largest first.
+          content:
+            application/json:
+              schema: { $ref: "#/components/schemas/DarkPoolLevelsSuccess" }
+        "400": { $ref: "#/components/responses/BadRequest" }
+        "401": { $ref: "#/components/responses/Unauthorized" }
+        "403": { $ref: "#/components/responses/Forbidden" }
+        "404": { $ref: "#/components/responses/NotFound" }
+        "402": { $ref: "#/components/responses/InsufficientCredits" }
+        "429": { $ref: "#/components/responses/RateLimited" }
+        "500": { $ref: "#/components/responses/InternalError" }
+        "503": { $ref: "#/components/responses/Unavailable" }
+        "504": { $ref: "#/components/responses/GatewayTimeout" }
+
+  /v1/dark-pool/daily:
+    get:
+      summary: Dark-pool totals by ticker and day
+      operationId: getDarkPoolDaily
+      x-credits: 3
+      tags: [Dark Pool]
+      description: |
+        Prints, shares, notional, $1M+ blocks and the largest print for each
+        ticker, one row per ticker per day (`group_by=day`) or summed over the
+        range (`group_by=ticker`). Without `tickers` it ranks every name.
+        Defaults to today (ET); ranges up to 366 days.
+      parameters:
+        - name: date
+          in: query
+          required: false
+          description: Single trade date (`YYYY-MM-DD`). Defaults to today (ET).
+          schema: { type: string, format: date }
+        - name: date_start
+          in: query
+          required: false
+          description: Inclusive start of a range (`YYYY-MM-DD`). Max span 366 days.
+          schema: { type: string, format: date }
+        - name: date_end
+          in: query
+          required: false
+          description: Inclusive end of a range (`YYYY-MM-DD`).
+          schema: { type: string, format: date }
+        - name: tickers
+          in: query
+          required: false
+          description: Comma-separated tickers (max 50). Omit for all names.
+          schema: { type: string, example: "AAPL,NVDA" }
+        - name: sectors
+          in: query
+          required: false
+          description: Comma-separated GICS sectors to include.
+          schema: { type: string }
+        - name: industries
+          in: query
+          required: false
+          description: Comma-separated GICS industries to include.
+          schema: { type: string }
+        - name: min_notional
+          in: query
+          required: false
+          description: Minimum total notional per row (USD).
+          schema: { type: number, format: double, minimum: 0, default: 0 }
+        - name: group_by
+          in: query
+          required: false
+          description: "`day`: a row per ticker per day. `ticker`: a row per ticker over the range."
+          schema: { type: string, enum: [day, ticker], default: day }
+        - name: sort
+          in: query
+          required: false
+          description: Sort key. `date` requires `group_by=day`.
+          schema:
+            type: string
+            enum: [notional, shares, prints, block_notional, block_prints, largest_print, date]
+            default: notional
+        - name: order
+          in: query
+          required: false
+          schema: { type: string, enum: [asc, desc], default: desc }
+        - name: limit
+          in: query
+          required: false
+          schema: { type: integer, default: 500, minimum: 1, maximum: 5000 }
+        - name: offset
+          in: query
+          required: false
+          schema: { type: integer, default: 0, minimum: 0, maximum: 100000 }
+      responses:
+        "200":
+          description: Dark-pool totals for the requested filters.
+          content:
+            application/json:
+              schema: { $ref: "#/components/schemas/DarkPoolDailySuccess" }
         "400": { $ref: "#/components/responses/BadRequest" }
         "401": { $ref: "#/components/responses/Unauthorized" }
         "403": { $ref: "#/components/responses/Forbidden" }
@@ -2857,6 +3384,19 @@ components:
           type: string
           description: Short opaque ID for log correlation.
           example: "d7574836"
+        nextCursor:
+          type: string
+          description: |
+            Trade feeds (`/v1/flow/{ticker}`, `/v1/contract/{symbol}/trades`):
+            pass back as `cursor` with the same filters for the next page.
+            Present only when more rows may follow.
+        nextEndTime:
+          type: string
+          format: date-time
+          description: |
+            `/v1/flow/{ticker}` only: the last row's exact time (RFC 3339 with
+            nanoseconds), for `end_time` paging. Inclusive, so rows at that
+            instant can repeat; `nextCursor` never repeats or skips.
 
     Error:
       type: object
@@ -2960,7 +3500,7 @@ components:
       required:
         [timestamp, tradeId, optionType, strike, expiration, dte,
          contracts, premium, price, bid, ask, mid,
-         underlyingPrice, isSweep, isMultiLeg, moneyness, scores]
+         underlyingPrice, isSweep, isMultiLeg, isCross, moneyness, scores]
       properties:
         timestamp: { type: string, format: date-time }
         tradeId: { type: string, example: "flow_188afe42c3a77af2_0" }
@@ -2994,6 +3534,12 @@ components:
         underlyingPrice: { type: number }
         isSweep: { type: boolean }
         isMultiLeg: { type: boolean }
+        isCross:
+          type: boolean
+          description: |
+            Pre-negotiated cross (OPRA condition 127): both sides were matched
+            before the print, so the execution side says nothing about who
+            initiated it.
         exchangeCount:
           type: [integer, "null"]
           description: Number of distinct OPRA exchanges that filled the order.
@@ -4462,7 +5008,7 @@ components:
          strike, right, dte, price, size, side, publisherId, neutralSz,
          totalPremium, underlyingPrice, moneyness, moneynessPercent,
          openInterest, prevOi, dailyVolume, sweepTrade, blockTrade,
-         multiLeg, ivDirection, ingestionTimestamp]
+         multiLeg, crossTrade, ivDirection, ingestionTimestamp]
       properties:
         date:
           type: integer
@@ -4521,6 +5067,11 @@ components:
         sweepTrade: { type: boolean }
         blockTrade: { type: boolean }
         multiLeg: { type: boolean }
+        crossTrade:
+          type: boolean
+          description: |
+            Pre-negotiated cross (OPRA condition 127): both sides were matched
+            before the print, so `side` says nothing about who initiated it.
         ivDirection:
           type: integer
           enum: [-1, 0, 1]
@@ -5192,6 +5743,12 @@ components:
               description: |
                 `true` when the page is full (`count == limit`), so more rows
                 may exist. Offset-based heuristic, not an exact total.
+            nextCursor:
+              type: [string, "null"]
+              description: |
+                Pass as `cursor`, with the same filters, for the next page
+                (`sort=time`). `null` when a newest-first sequence is
+                exhausted; `order=asc` always returns one, for polling.
 
     DarkPoolTradesSuccess:
       type: object
@@ -5226,6 +5783,95 @@ components:
           type: array
           items: { $ref: "#/components/schemas/DarkPoolTopPrint" }
         meta: { $ref: "#/components/schemas/Meta" }
+
+    DarkPoolLevel:
+      type: object
+      description: Dark-pool volume in one price bucket over the window.
+      required: [price, prints, shares, notional, pctOfNotional, blockPrints, blockNotional]
+      properties:
+        price: { type: number, format: double, description: Lower edge of the bucket (USD). }
+        prints: { type: integer, minimum: 0 }
+        shares: { type: integer, minimum: 0 }
+        notional: { type: number, format: double, description: Notional printed in the bucket (USD). }
+        pctOfNotional:
+          type: number
+          format: double
+          description: Percent of the window's total dark-pool notional.
+        blockPrints: { type: integer, minimum: 0, description: Prints of at least $1M. }
+        blockNotional: { type: number, format: double, description: Notional of those prints (USD). }
+
+    DarkPoolLevelsMeta:
+      allOf:
+        - $ref: "#/components/schemas/Meta"
+        - type: object
+          required: [ticker, dateStart, dateEnd, bucket, totalShares, totalNotional]
+          properties:
+            ticker: { type: string }
+            dateStart: { type: string, format: date }
+            dateEnd: { type: string, format: date }
+            bucket: { type: number, format: double, description: Bucket width applied (USD). }
+            totalShares: { type: integer, minimum: 0, description: Window total across every level. }
+            totalNotional: { type: number, format: double, description: Window total across every level (USD). }
+
+    DarkPoolLevelsSuccess:
+      type: object
+      required: [data, meta]
+      properties:
+        data:
+          type: array
+          items: { $ref: "#/components/schemas/DarkPoolLevel" }
+        meta: { $ref: "#/components/schemas/DarkPoolLevelsMeta" }
+
+    DarkPoolDailyRow:
+      type: object
+      description: Dark-pool totals for one ticker, on one day or over the range.
+      required:
+        [date, ticker, sector, industry, prints, shares, notional, vwap, blockPrints, blockNotional, largestPrint, days]
+      properties:
+        date:
+          type: [string, "null"]
+          format: date
+          description: Trade date; `null` with `group_by=ticker`.
+        ticker: { type: string }
+        sector: { type: string }
+        industry: { type: string }
+        prints: { type: integer, minimum: 0 }
+        shares: { type: integer, minimum: 0 }
+        notional: { type: number, format: double, description: USD. }
+        vwap: { type: number, format: double, description: Notional-weighted average print price. }
+        blockPrints: { type: integer, minimum: 0, description: Prints of at least $1M. }
+        blockNotional: { type: number, format: double, description: Notional of those prints (USD). }
+        largestPrint: { type: number, format: double, description: Largest single print (USD). }
+        days: { type: integer, minimum: 0, description: Days with prints in the row. }
+        pctAvgVol:
+          type: [number, "null"]
+          format: double
+          description: |
+            Average daily dark-pool shares as a percent of the ticker's average
+            daily volume. `null` when no ADV is available.
+
+    DarkPoolDailyMeta:
+      allOf:
+        - $ref: "#/components/schemas/Meta"
+        - type: object
+          required: [dateStart, dateEnd, groupBy, limit, offset, count, hasMore]
+          properties:
+            dateStart: { type: string, format: date }
+            dateEnd: { type: string, format: date }
+            groupBy: { type: string, enum: [day, ticker] }
+            limit: { type: integer }
+            offset: { type: integer }
+            count: { type: integer }
+            hasMore: { type: boolean, description: "`true` when the page is full (`count == limit`)." }
+
+    DarkPoolDailySuccess:
+      type: object
+      required: [data, meta]
+      properties:
+        data:
+          type: array
+          items: { $ref: "#/components/schemas/DarkPoolDailyRow" }
+        meta: { $ref: "#/components/schemas/DarkPoolDailyMeta" }
 
   responses:
     BadRequest:
@@ -5302,8 +5948,12 @@ components:
                   message: "The request took too long and was not completed. It was not charged; narrow the request or retry."
     RateLimited:
       description: >-
-        The key exceeded its requests-per-minute limit (`X-RateLimit-Limit`).
-        No `Retry-After` is sent; wait until `X-RateLimit-Reset`, then retry.
+        Either the key exceeded its requests-per-minute limit
+        (`X-RateLimit-Limit`; no `Retry-After`, wait until
+        `X-RateLimit-Reset`), or the account is over one of the API's own
+        limits, such as the query budget (queries running at once, fresh
+        queries per second): `TOO_MANY_CONCURRENT_QUERIES` or `RATE_LIMITED`
+        with `Retry-After`. Not charged; retry after the wait.
       content:
         application/json:
           schema: { $ref: "#/components/schemas/Error" }
@@ -5313,6 +5963,13 @@ components:
                 error:
                   code: RATE_LIMITED
                   message: "Rate limit exceeded."
+            queryBudget:
+              value:
+                error:
+                  code: TOO_MANY_CONCURRENT_QUERIES
+                  message: "This account already has 16 queries running on the shared query engine across all servers (limit ch.concurrent.customer). Cached answers are not affected. Retry after Retry-After; to backfill a day, follow meta.nextCursor instead of splitting time windows. See https://www.skylit.ai/docs/api-reference/rate-limits-and-retries"
+                  retry_after: 1
+                  docs_url: "https://www.skylit.ai/docs/api-reference/errors#too_many_concurrent_queries"
     InternalError:
       description: >-
         Unexpected server error (`INTERNAL_ERROR`, `DATABASE_ERROR`). Not

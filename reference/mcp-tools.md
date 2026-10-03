@@ -149,8 +149,10 @@ Off-exchange (TRF) prints. No side / BBO / greeks — these are raw block prints
 | `heat_stats_daily` | Daily gamma/vanna stats for up to 50 symbols over up to 31 days (400 symbol-days): spot OHLC, largest positive and negative strike exposure, concentration | **`symbols`**, **`from`**, `metric`, `to` | `GET /v1/stats/daily` | 5 |
 | `heat_symbols` | Every symbol with gamma/vanna data: index flag, previous tickers after a rename, available metrics and history date range | none | `GET /v1/symbols` | 0 |
 
-> **Note:** `heat_heatmap` accepts comma-separated `symbols` (e.g. `SPY,SPX,QQQ`) for a single
-> cross-asset call — handy for finding gamma/vanna walls across correlated names at once.
+> **Note:** `heat_heatmap` accepts comma-separated `symbols` (e.g. `SPXW,SPY,QQQ`, the app's Trinity)
+> for a single cross-asset call — handy for finding gamma/vanna walls across correlated names
+> at once. For the S&P use `SPXW`: `SPX` holds only the AM-settled monthlies, with no 0DTE or
+> weekly gamma (likewise `NDXP` / `NDX` and `RUTW` / `RUT`).
 
 ## Tempest — volatility suite
 
@@ -190,5 +192,5 @@ One-call answers built from the tools above, each with a short factual `summary`
 | `explain_levels` | Key dealer-positioning levels for one symbol: spot, King node, flip, largest positive and negative walls, net exposure, five largest levels | **`symbol`**, `metric` | `GET /v1/gex/levels` | 1 |
 | `vol_context` | 30-day implied volatility, IV rank, 1-year percentile and range, curve shape, 1-sigma expected moves by horizon (from the current price), scheduled events | **`symbol`** | `GET /v1/vol/iv` + `GET /v1/vol/cones` | 2 |
 | `whats_changed` | How one symbol's board moved since an earlier instant: spot move, King node then and now, the five strikes whose net exposure changed most | **`symbol`**, **`since`**, `metric` | `GET /v1/historical` + `GET /v1/heatmap` | 6 |
-| `market_brief` | VIX complex (computed from the SPX and VIX option chains), market-wide options flow (premium, call/put ratio, net premium, most active) and SPX and QQQ key levels | none | `GET /v1/gex/levels` + `GET /v1/market/overview` + `GET /v1/vol/market` | 5 |
+| `market_brief` | VIX complex (computed from the SPX and VIX option chains), market-wide options flow (premium, call/put ratio, net premium, most active) and key levels for SPXW (S&P 500 dailies and weeklies, 0DTE included, as in the app's Trinity view) and QQQ | none | `GET /v1/gex/levels` + `GET /v1/market/overview` + `GET /v1/vol/market` | 5 |
 | `flow_context` | Today's flow read for one ticker: bull/bear split and bias, sweep counts and premium, largest recent dark-pool prints | **`ticker`** | `GET /v1/chain-bull-bear/{ticker}` + `GET /v1/sweeps/{ticker}` + `GET /v1/dark-pool/top-prints/{ticker}` | 9 |

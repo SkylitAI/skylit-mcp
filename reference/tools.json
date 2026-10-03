@@ -473,7 +473,7 @@
     {
       "name": "market_brief",
       "section": "Intelligence tools",
-      "returns": "VIX complex (computed from the SPX and VIX option chains), market-wide options flow (premium, call/put ratio, net premium, most active) and SPX and QQQ key levels",
+      "returns": "VIX complex (computed from the SPX and VIX option chains), market-wide options flow (premium, call/put ratio, net premium, most active) and key levels for SPXW (S&P 500 dailies and weeklies, 0DTE included, as in the app's Trinity view) and QQQ",
       "endpoint": [
         "GET /v1/gex/levels",
         "GET /v1/market/overview",

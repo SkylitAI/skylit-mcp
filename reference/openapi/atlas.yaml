@@ -33,6 +33,7 @@ info:
     | `/v1/config`   | 0    |
     | `/v1/time`     | 0    |
     | `/v1/openapi.json` | 0 |
+    | `/v1/stream/bars` | 1 per symbol to connect, then 1 per symbol per minute open |
 
     New customers are seeded with 5,000 credits. Every chargeable response
     carries `X-Credits-Remaining: <balance>`. Out of credits → `402`
@@ -98,6 +99,8 @@ security:
 tags:
   - name: History
     description: OHLCV price bars.
+  - name: Streaming
+    description: Live OHLCV bars over Server-Sent Events.
   - name: Symbols
     description: Symbol search and resolution.
   - name: Meta
@@ -241,6 +244,140 @@ paths:
         "403": { $ref: "#/components/responses/AccountSuspended" }
         "429": { $ref: "#/components/responses/RateLimited" }
         "503": { $ref: "#/components/responses/Unavailable" }
+
+  /v1/stream/bars:
+    get:
+      summary: Live OHLCV bars (SSE, up to 10 symbols per connection)
+      operationId: streamBars
+      x-credits: 1
+      x-credits-per-minute: 1
+      tags: [Streaming]
+      description: |
+        A **Server-Sent Events** (`text/event-stream`) feed of live OHLCV bars
+        for up to 10 symbols at one `resolution`. Authenticate with the
+        `Authorization` header like every other endpoint; keys are never
+        accepted in the URL.
+
+        **Availability.** Streaming is enabled per account. Until it is, the
+        endpoint answers `403` `stream_not_enabled` and charges nothing.
+
+        **Credits.** 1 credit per symbol to connect, then 1 credit per symbol
+        for each further minute the stream is open (a 3-symbol stream costs 3
+        to open and 3 per minute). Every refusal (`4xx`/`5xx` before the stream
+        starts) is free. A stream whose `connected` event never reached the
+        client is refunded.
+
+        ### Events
+
+        | Event | `id:` | Payload |
+        |---|---|---|
+        | `connected` | no | `{symbols, resolution, creditsRemaining, creditsPerMinute, maxDurationSeconds}` |
+        | `bar` | yes | `{symbol, resolution, t, o, h, l, c, v, bv, sv, uv, coalesced}`. On connect: the two latest bars per symbol; then every new bar and every change to the latest one. |
+        | `stale` | no | `{symbol, reason: "upstream_unavailable" \| "snapshot_failed" \| "missed_updates", message}`: this server cannot confirm the symbol's bars are current (its live feed connection is down, the initial snapshot could not be read, or updates stopped arriving). Bar events resume after `fresh`. |
+        | `fresh` | no | `{symbol}`: the symbol is current again after `stale`. |
+        | `symbol_unavailable` | no | `{symbol, reason: "no_live_bars", message}`: no bars yet in the symbol's current session (for example before the pre-market open). |
+        | `gap` | no | `{symbol, from, to, message}`: on resume, bars in `[from, to)` are not replayed; fetch them from `/v1/history`. |
+        | `credits` | no | `{remaining, charged}` after each per-minute debit. |
+        | `closed` | no | `{reason}`; the stream ends. `insufficient_credits`, `monthly_cap_reached`, `account_suspended`, `key_revoked` (an API key on the account was revoked after this stream opened), `credit_check_failed`, `api_paused`, `account_blocked`, `stream_disabled` (streaming was turned off for the account), `stream_error`. |
+        | `reconnect` | yes | `{reason: "max_duration" \| "server_shutdown"}`; the stream ends. Reconnect with `Last-Event-ID`. |
+        | `: ping` | no | SSE comment every 15 s so idle proxies keep the connection. |
+
+        **Bars.** `t` is the bar's open time (Unix seconds, UTC), aligned to
+        `resolution` like `/v1/history`. A bar is re-sent whenever it changes;
+        a bar is final once a bar with a later `t` has been sent for that
+        symbol. Bars are the extended-hours session (the live feed has no
+        regular-hours filter). Freshness: the stream follows the same live bar
+        feed as the Skylit app's charts. The in-progress bar updates about once
+        a second while the symbol trades, and each minute's final values
+        follow when it closes.
+
+        **Backpressure.** A client that reads slower than bars change is never
+        queued behind: it receives the symbol's newest state, and `coalesced`
+        says how many updates it skipped since its previous `bar` for that
+        symbol (usually 0). A client that reads nothing for 30 seconds is
+        disconnected.
+
+        **Resume.** Each `bar` and `reconnect` carries an `id:` that is the
+        connection's position in every symbol: `SYMBOL:t` pairs separated by
+        commas (`SPY:1790000000,QQQ:1790000060`). Per symbol it never
+        decreases. Reconnect with header `Last-Event-ID: <last id>`
+        (`EventSource` does this automatically) or `?lastEventId=`, and the
+        same `resolution`: bars from that time on are replayed from the
+        current session (the bar at exactly that time is re-sent). Bars before
+        the current session, or more than 500 per symbol, get a `gap` event
+        instead.
+
+        **Limits.** At most 10 symbols per stream. Concurrent streams per
+        account are limited per server (`429` `stream_limit_reached` with
+        `Retry-After`). Streams last at most 60 minutes, then get `reconnect`.
+      parameters:
+        - name: symbols
+          in: query
+          required: true
+          description: Comma-separated symbols (at most 10), as `/v1/search` returns them.
+          schema: { type: string, example: "SPY,QQQ" }
+        - name: resolution
+          in: query
+          required: false
+          description: Bar size in minutes (the 1-minute tier of `/v1/history`).
+          schema:
+            type: string
+            enum: ["1", "2", "3", "5", "15", "30"]
+            default: "1"
+        - name: lastEventId
+          in: query
+          required: false
+          description: Resume cursor, for clients that cannot set the `Last-Event-ID` header.
+          schema: { type: string, example: "SPY:1790000000" }
+        - name: Last-Event-ID
+          in: header
+          required: false
+          description: Resume cursor (the last `id:` received).
+          schema: { type: string }
+      responses:
+        "200":
+          description: The event stream.
+          headers:
+            X-Credits-Remaining: { $ref: "#/components/headers/CreditsRemaining" }
+          content:
+            text/event-stream:
+              schema: { type: string }
+              example: |
+                retry: 3000
+
+                event: connected
+                data: {"symbols":["SPY"],"resolution":"1","creditsRemaining":4812,"creditsPerMinute":1,"maxDurationSeconds":3600}
+
+                event: bar
+                id: SPY:1790000000
+                data: {"symbol":"SPY","resolution":"1","t":1790000000,"o":742.1,"h":742.3,"l":742.0,"c":742.25,"v":18120,"bv":9040,"sv":8810,"uv":270,"coalesced":0}
+        "400":
+          description: Missing or invalid `symbols` or `resolution` (`invalid_parameter`). Not charged.
+          content: { application/json: { schema: { $ref: "#/components/schemas/Error" } } }
+        "401": { $ref: "#/components/responses/Unauthorized" }
+        "402": { $ref: "#/components/responses/InsufficientCredits" }
+        "403":
+          description: >-
+            `stream_not_enabled` (streaming is not enabled for this account),
+            `account_blocked`, `account_suspended`, or an unknown, revoked or
+            expired API key. Not charged.
+          content: { application/json: { schema: { $ref: "#/components/schemas/Error" } } }
+        "404":
+          description: Unknown symbol (`symbol_not_found`). Not charged.
+          content: { application/json: { schema: { $ref: "#/components/schemas/Error" } } }
+        "429":
+          description: >-
+            `stream_limit_reached` (the account's concurrent streams on this
+            server), with `Retry-After`, or the gateway rate limit. Not charged.
+          headers: { Retry-After: { schema: { type: integer } } }
+          content: { application/json: { schema: { $ref: "#/components/schemas/Error" } } }
+        "503":
+          description: >-
+            `stream_capacity` (this server is at its stream or distinct-symbol
+            capacity, or shutting down; retry, with `Retry-After`), `api_paused`,
+            `stream_unavailable`, or
+            `credit_check_failed`. Not charged.
+          content: { application/json: { schema: { $ref: "#/components/schemas/Error" } } }
 
   /v1/search:
     get:
