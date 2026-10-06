@@ -1196,6 +1196,24 @@ paths:
         Tempest's backfill does (up to about two years); `/v1/vol/symbols`
         shows each symbol's last stored session.
 
+        **Expected move at each close.** Every row also carries the
+        one-standard-deviation (1-sigma) move options priced at that session's
+        close for the span to the next session's close, so each past day's
+        priced range can be replayed:
+
+        | Column | Meaning |
+        |---|---|
+        | `em_1d_pct` | The 1-sigma move, in % of that session's close |
+        | `em_1d` | The same move in $ (`close * em_1d_pct / 100`) |
+        | `range_1d_low` | `close - em_1d` |
+        | `range_1d_high` | `close + em_1d` |
+        | `em_1d_event` | `1` when an earnings report falls inside the span and its priced move is counted in full, else `0` |
+
+        It is the same next-day move as the Tempest cone at that close: the
+        nearest expiry's priced variance, split by trading time, so a Friday
+        close prices the weekend. The band is symmetric (no skew). The values
+        are `null` where a session has no reading, and for `VIX`.
+
         **Cost:** per symbol-day: 1 credit per 10 symbol-weekdays in the
         requested window, rounded up, minimum 1 (1 symbol x the default month
         is 3; 10 symbols x one year is 261). Computed from the request, so
@@ -1224,6 +1242,26 @@ paths:
           content:
             application/json:
               schema: { $ref: "#/components/schemas/VolHistoryResponse" }
+              examples:
+                expectedMove:
+                  summary: SPY, two sessions, fields=close,svx1d,em_1d_pct,em_1d,range_1d_low,range_1d_high,em_1d_event
+                  value:
+                    data:
+                      from: "2026-09-30"
+                      to: "2026-10-01"
+                      symbols:
+                        - symbol: SPY
+                          dates: ["2026-09-30", "2026-10-01"]
+                          columns:
+                            close: [762.34, 764.1]
+                            svx1d: [15.2843, 16.5274]
+                            em_1d_pct: [0.8003, 0.8654]
+                            em_1d: [6.101, 6.6124]
+                            range_1d_low: [756.239, 757.4876]
+                            range_1d_high: [768.441, 770.7124]
+                            em_1d_event: [0, 0]
+                      missing: []
+                    meta: { module: history, sessionDate: "2026-10-01", marketState: closed, frozen: true, cached: false }
         "400": { $ref: "#/components/responses/BadRequest" }
         "401": { $ref: "#/components/responses/Unauthorized" }
         "402": { $ref: "#/components/responses/PaymentRequired" }
