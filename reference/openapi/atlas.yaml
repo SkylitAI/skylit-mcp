@@ -535,7 +535,6 @@ paths:
                       - { name: fund, value: fund }
                       - { name: dr, value: dr }
                       - { name: index, value: index }
-                      - { name: futures, value: futures }
         "401": { $ref: "#/components/responses/Unauthorized" }
         "403": { $ref: "#/components/responses/AccountSuspended" }
 
