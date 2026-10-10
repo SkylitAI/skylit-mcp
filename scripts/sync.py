@@ -9,6 +9,11 @@ built from:
     python3 scripts/sync.py          # refresh reference/ and the README's generated block
     python3 scripts/sync.py --check  # fail if anything in the repo names a tool or path that no longer exists
 
+The Nexus Trades API spec (reference/openapi/nexus-trades.json) and its tool
+definitions (reference/nexus-trades-tools.json) are hand-kept, because that
+spec isn't published at a docs URL yet. Both runs read them, never overwrite
+them, and fail when a tool and the spec disagree.
+
 Standard library only. On a fetch error nothing is written.
 """
 
@@ -32,8 +37,16 @@ SOURCES = {
 # Where tool names and REST paths are written by hand; --check reads these.
 CHECKED = ["README.md", "GEMINI.md", "llms-install.md", "skills", "plugins", "examples", "clients", "packages"]
 TOOL_PREFIXES = ("heat_", "tempest_", "flow_", "dark_pool_", "top_", "unusual_", "underlying_",
-                 "contract_", "market_", "chain_", "list_active_", "account_", "trade_", "sector_")
+                 "contract_", "market_", "chain_", "list_active_", "account_", "trade_", "sector_", "nexus_")
 START, END = "<!-- sync:tools:start -->", "<!-- sync:tools:end -->"
+# Hand-kept: read on every run, never fetched or overwritten.
+TRADES_SPEC = "reference/openapi/nexus-trades.json"
+TRADES_TOOLS = "reference/nexus-trades-tools.json"
+# Write tools whose route refuses `test: true` outright, so they can't offer it.
+# (The futures modify route rehearses a size change on a test order, so it offers it.)
+NO_TEST_MODE = {"nexus_modify_order"}
+# En and em dashes: member-facing copy never uses them.
+DASHES = "[" + chr(0x2013) + chr(0x2014) + "]"
 
 # Every human-facing skylit.ai link carries UTMs so visits, signups and
 # free-to-paid conversions from each surface are attributable.
@@ -116,6 +129,81 @@ def spec_paths(yaml_text: str) -> set[str]:
     return {m.group(1) for m in re.finditer(r"^  (/v1/[^:\s]*):\s*$", yaml_text, re.M)}
 
 
+def load_trading() -> tuple[dict, dict]:
+    spec = json.loads((ROOT / TRADES_SPEC).read_text(encoding="utf-8"))
+    tools = json.loads((ROOT / TRADES_TOOLS).read_text(encoding="utf-8"))
+    return spec, tools
+
+
+def check_trading(spec: dict, doc: dict) -> list[str]:
+    """Every production route has exactly one tool, and every tool matches its
+    route: method, path, operationId, argument names, and the write-tool safety
+    rules (not read-only, says PAPER, offers test mode, requires clientOrderId
+    where the route takes one)."""
+    where, problems = TRADES_TOOLS, []
+    schemas = spec.get("components", {}).get("schemas", {})
+    params = spec.get("components", {}).get("parameters", {})
+
+    def deref(obj: dict) -> dict:
+        ref = obj.get("$ref", "")
+        if ref.startswith("#/components/schemas/"):
+            return schemas.get(ref.rsplit("/", 1)[1], {})
+        if ref.startswith("#/components/parameters/"):
+            return params.get(ref.rsplit("/", 1)[1], {})
+        return obj
+
+    ops = {}
+    for path, item in spec.get("paths", {}).items():
+        for method, op in item.items():
+            if method in ("get", "post", "put", "patch", "delete"):
+                ops[f"{method.upper()} {path}"] = op
+    tools = doc.get("tools", [])
+    if doc.get("count") != len(tools):
+        problems.append(f"{where}: count is {doc.get('count')} but {len(tools)} tools are listed")
+    seen: dict[str, str] = {}
+    for t in tools:
+        name, endpoint = t.get("name", "?"), t.get("endpoint", "")
+        op = ops.get(endpoint)
+        if op is None:
+            problems.append(f"{where}: `{name}` calls {endpoint or 'nothing'}, which isn't in {TRADES_SPEC}")
+            continue
+        if endpoint in seen:
+            problems.append(f"{where}: `{name}` and `{seen[endpoint]}` both call {endpoint}")
+        seen[endpoint] = name
+        if t.get("operationId") != op.get("operationId"):
+            problems.append(f"{where}: `{name}` says operationId {t.get('operationId')}, the spec says {op.get('operationId')}")
+        method, path = endpoint.split(" ", 1)
+        schema = t.get("inputSchema", {})
+        props, required = schema.get("properties", {}), set(schema.get("required", []))
+        placeholders = set(re.findall(r"\{([^}]+)\}", path))
+        query = {p["name"] for p in map(deref, op.get("parameters", [])) if p.get("in") == "query"}
+        body_schema = deref(op.get("requestBody", {}).get("content", {}).get("application/json", {}).get("schema", {}))
+        body = set(body_schema.get("properties", {}))
+        for p in sorted(placeholders - required):
+            problems.append(f"{where}: `{name}` must require the path argument `{p}`")
+        for arg in sorted(set(props) - placeholders - (query if method == "GET" else body)):
+            problems.append(f"{where}: `{name}` takes `{arg}`, which {endpoint} doesn't")
+        hints = t.get("annotations", {})
+        desc = t.get("description", "")
+        if re.search(DASHES, desc + json.dumps(schema, ensure_ascii=False)):
+            problems.append(f"{where}: `{name}` copy has an em or en dash")
+        if method == "GET":
+            if hints.get("readOnlyHint") is not True:
+                problems.append(f"{where}: read tool `{name}` must set readOnlyHint true")
+            continue
+        if hints.get("readOnlyHint") is not False:
+            problems.append(f"{where}: write tool `{name}` must set readOnlyHint false")
+        if "PAPER" not in desc:
+            problems.append(f"{where}: write tool `{name}` must say in its description that it trades PAPER")
+        if "test" in body and "test" not in props and name not in NO_TEST_MODE:
+            problems.append(f"{where}: write tool `{name}` must offer `test`")
+        if "clientOrderId" in body and "clientOrderId" not in required:
+            problems.append(f"{where}: write tool `{name}` must require `clientOrderId` for safe retries")
+    for endpoint in sorted(set(ops) - set(seen)):
+        problems.append(f"{where}: no tool for {endpoint} ({ops[endpoint].get('operationId')})")
+    return problems
+
+
 def norm(path: str) -> str:
     return re.sub(r"\{[^}]+\}", "{}", path.split("?")[0].rstrip("/"))
 
@@ -165,8 +253,9 @@ def check(tools: list[dict], paths: set[str]) -> list[str]:
         rel = f.relative_to(ROOT)
         for n in set(re.findall(r"[`'\"]([a-z][a-z0-9]*(?:_[a-z0-9]+)+)[`'\"]", text)):
             if n.startswith(TOOL_PREFIXES) and n not in names and not n.endswith(("_key", "_url", "_id")):
-                problems.append(f"{rel}: tool `{n}` is not in the live catalog")
-        for p in set(re.findall(r"(/v1/[A-Za-z0-9_\-/{}.]+)", text)):
+                source = TRADES_TOOLS if n.startswith("nexus_") else "the live catalog"
+                problems.append(f"{rel}: tool `{n}` is not in {source}")
+        for p in set(re.findall(r"((?:/api/nexus)?/v1/[A-Za-z0-9_\-/{}.]+)", text)):
             p = p.rstrip(".")
             if p.endswith(".json") or p == "/v1" or "{" in p and p.count("{") != p.count("}"):
                 continue
@@ -187,6 +276,12 @@ def main() -> int:
         print(f"parsed only {len(tools)} tools; the catalog format changed, nothing written", file=sys.stderr)
         return 2
     paths = set().union(*(spec_paths(v) for k, v in fetched.items() if k.endswith(".yaml")))
+    try:
+        trades_spec, trades_tools = load_trading()
+    except (OSError, ValueError) as e:
+        print(f"can't read the hand-kept trading files, nothing written: {e}", file=sys.stderr)
+        return 2
+    paths |= set(trades_spec.get("paths", {}))
 
     if not only_check:
         for dest, body in fetched.items():
@@ -201,7 +296,9 @@ def main() -> int:
         print(f"synced: {len(tools)} tools, {len(paths)} REST paths")
 
     utm_missing = tag_links(write=not only_check)
-    problems = check(tools, paths) + (utm_missing if only_check else [])
+    trading_names = [{"name": t.get("name", "")} for t in trades_tools.get("tools", [])]
+    problems = (check(tools + trading_names, paths) + check_trading(trades_spec, trades_tools)
+                + (utm_missing if only_check else []))
     for p in problems:
         print(f"DRIFT {p}")
     return 1 if problems else 0
