@@ -5,16 +5,26 @@
  *   const skylit = new Skylit();          // reads SKYLIT_API_KEY
  *   await skylit.gexLevels("SPY");
  *
- * Read-only: the API serves data and never places orders.
+ * Market data is read-only. The Nexus trading methods (openTrade, exitTrade,
+ * closeFutures and friends) place PAPER trades on your own Nexus account and
+ * never reach a broker.
  * Agents can also connect to the hosted MCP server at MCP_URL.
  */
 
 export const API_URL = "https://api.skylit.ai";
 export const MCP_URL = "https://mcp.skylit.ai/mcp";
+/** The Nexus Trades API: paper trades on your own Nexus account, same key. */
+export const TRADES_URL = "https://app.skylit.ai";
 export const VERSION = "0.1.3";
 
 export type Symbols = string | readonly string[];
 export type Params = Record<string, string | number | boolean | readonly string[] | undefined | null>;
+/**
+ * A Nexus Trades API request body, using the API's field names. Send
+ * `test: true` to rehearse an order, and a `clientOrderId` you reuse on a retry
+ * so the retry can't place a second order.
+ */
+export type TradeBody = Record<string, string | number | boolean | undefined>;
 /** Every response is `{ data, meta }`; `meta` carries credits and rate-limit state. */
 export interface SkylitResponse<T = unknown> {
   data: T;
@@ -26,6 +36,8 @@ export interface SkylitOptions {
   /** Defaults to process.env.SKYLIT_API_KEY. Create one at https://app.skylit.ai/developer. */
   apiKey?: string;
   baseUrl?: string;
+  /** Host for the Nexus trading methods (default TRADES_URL). */
+  tradesUrl?: string;
   /** Request timeout in milliseconds (default 30000). */
   timeoutMs?: number;
   /** Custom fetch (tests, proxies). Defaults to the global fetch. */
@@ -45,9 +57,11 @@ export class SkylitError extends Error {
 }
 
 const joinSymbols = (s: Symbols): string => (typeof s === "string" ? s : s.join(","));
+const seg = (s: string): string => encodeURIComponent(s);
 
 export class Skylit {
   readonly baseUrl: string;
+  readonly tradesUrl: string;
   readonly timeoutMs: number;
   readonly #key: string;
   readonly #fetch: typeof fetch;
@@ -62,19 +76,38 @@ export class Skylit {
     }
     this.#key = key;
     this.baseUrl = (options.baseUrl ?? API_URL).replace(/\/+$/, "");
+    this.tradesUrl = (options.tradesUrl ?? TRADES_URL).replace(/\/+$/, "");
     this.timeoutMs = options.timeoutMs ?? 30_000;
     this.#fetch = options.fetch ?? globalThis.fetch.bind(globalThis);
   }
 
   /** GET any documented endpoint, e.g. `get("/v1/gex/levels", { symbols: "SPY" })`. */
-  async get<T = unknown>(path: string, params: Params = {}): Promise<SkylitResponse<T>> {
-    const url = new URL(this.baseUrl + "/" + path.replace(/^\/+/, ""));
+  get<T = unknown>(path: string, params: Params = {}): Promise<SkylitResponse<T>> {
+    return this.#request<T>("GET", this.baseUrl, path, params);
+  }
+
+  #trading<T = unknown>(method: "GET" | "POST", path: string, params: Params = {}, payload?: TradeBody) {
+    return this.#request<T>(method, this.tradesUrl, "/api/nexus/v1" + path, params, payload);
+  }
+
+  async #request<T>(
+    method: "GET" | "POST",
+    base: string,
+    path: string,
+    params: Params,
+    payload?: TradeBody,
+  ): Promise<SkylitResponse<T>> {
+    const url = new URL(base + "/" + path.replace(/^\/+/, ""));
     for (const [k, v] of Object.entries(params)) {
       if (v === undefined || v === null) continue;
       url.searchParams.set(k, Array.isArray(v) ? v.join(",") : String(v));
     }
+    const headers: Record<string, string> = { Authorization: `Bearer ${this.#key}`, Accept: "application/json" };
+    if (payload !== undefined) headers["Content-Type"] = "application/json";
     const res = await this.#fetch(url, {
-      headers: { Authorization: `Bearer ${this.#key}`, Accept: "application/json" },
+      method,
+      headers,
+      body: payload === undefined ? undefined : JSON.stringify(payload),
       signal: AbortSignal.timeout(this.timeoutMs),
     });
     const text = await res.text();
@@ -122,6 +155,63 @@ export class Skylit {
   /** Bull/bear pressure across a ticker's option chain. */
   flowTone(ticker: string, timeframe = "1d") {
     return this.get(`/v1/chain-bull-bear/${encodeURIComponent(ticker)}`, { timeframe });
+  }
+
+  // Nexus paper trading. Writes place PAPER trades on your own Nexus account and
+  // never reach a broker. Send `test: true` to rehearse, and a `clientOrderId`
+  // you reuse on a retry so the retry can't place a second order.
+
+  /** What this key can trade in Nexus right now. Call it before any order. */
+  tradingCapabilities() {
+    return this.#trading("GET", "/trading/capabilities");
+  }
+  /** Your options and stock trades. `test: true` lists your test log. */
+  trades(params: { status?: "open" | "closed" | "all"; limit?: number; offset?: number; test?: boolean } = {}) {
+    return this.#trading("GET", "/trades", params);
+  }
+  /** One options or stock trade, with its exits. */
+  trade(tradeId: string) {
+    return this.#trading("GET", `/trades/${seg(tradeId)}`);
+  }
+  /** Open a PAPER trade: options, stocks or futures, e.g. `{ contract: "SPY 600C 10/16", quantity: 1, clientOrderId: "a1", test: true }`. */
+  openTrade(order: TradeBody) {
+    return this.#trading("POST", "/trades", {}, order);
+  }
+  /** Trim (`quantity`) or close (`closeAll: true`) an options or stock trade at market. */
+  exitTrade(tradeId: string, request: TradeBody) {
+    return this.#trading("POST", `/trades/${seg(tradeId)}/exits`, {}, request);
+  }
+  /** A futures account: balance, positions and loss rules. `account` is practice, evaluation, funded or an account id. */
+  futuresAccount(account = "practice") {
+    return this.#trading("GET", `/trading/accounts/${seg(account)}`);
+  }
+  /** Futures order and fill history, newest first. */
+  futuresOrders(account = "practice", params: { limit?: number; before?: string } = {}) {
+    return this.#trading("GET", `/trading/accounts/${seg(account)}/orders`, params);
+  }
+  /** Futures orders resting on the account. */
+  futuresWorkingOrders(account = "practice") {
+    return this.#trading("GET", `/trading/accounts/${seg(account)}/orders/working`);
+  }
+  /** One futures order. */
+  futuresOrder(account: string, orderId: string) {
+    return this.#trading("GET", `/trading/accounts/${seg(account)}/orders/${seg(orderId)}`);
+  }
+  /** Close one futures position (`ticker`) or flatten the account (`closeAll: true`). */
+  closeFutures(account: string, request: TradeBody) {
+    return this.#trading("POST", `/trading/accounts/${seg(account)}/close`, {}, request);
+  }
+  /** Cancel one resting futures order. `test: true` acts on a test order only. */
+  cancelFuturesOrder(account: string, orderId: string, options: { test?: boolean } = {}) {
+    return this.#trading("POST", `/trading/accounts/${seg(account)}/orders/${seg(orderId)}/cancel`, {}, { ...options });
+  }
+  /** Cancel every resting futures order (`cancelAll: true`) or one contract's (`ticker`). */
+  cancelFuturesOrders(account: string, request: TradeBody) {
+    return this.#trading("POST", `/trading/accounts/${seg(account)}/orders/cancel`, {}, request);
+  }
+  /** Move a resting futures order's price. Test orders can't be moved. */
+  modifyFuturesOrder(account: string, orderId: string, price: number) {
+    return this.#trading("POST", `/trading/accounts/${seg(account)}/orders/${seg(orderId)}/modify`, {}, { price });
   }
 }
 
