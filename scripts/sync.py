@@ -43,7 +43,8 @@ START, END = "<!-- sync:tools:start -->", "<!-- sync:tools:end -->"
 TRADES_SPEC = "reference/openapi/nexus-trades.json"
 TRADES_TOOLS = "reference/nexus-trades-tools.json"
 # Write tools whose route refuses `test: true` outright, so they can't offer it.
-NO_TEST_MODE = {"nexus_futures_modify_order"}
+# (The futures modify route rehearses a size change on a test order, so it offers it.)
+NO_TEST_MODE = {"nexus_modify_order"}
 # En and em dashes: member-facing copy never uses them.
 DASHES = "[" + chr(0x2013) + chr(0x2014) + "]"
 

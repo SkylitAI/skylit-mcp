@@ -4,7 +4,7 @@
     "title": "Nexus Trades API",
     "version": "1.0.0",
     "summary": "Open, trim, close and read your Nexus paper trades from your own bot or script, with your Skylit API key.",
-    "description": "## What it is\n\nThe Nexus Trades API lets your own bot open, trim, close and read your Nexus trades with your Skylit API key. Options and stock orders go to your Nexus paper wallet. Futures orders go to your practice account, or to an evaluation or funded account you name. Every order goes through the same checks, the same live prices and the same account rules as an order you place by hand in Nexus.\n\n- **It never sends trades to a broker.** Nothing here reaches a real market, even if you've connected a broker to Nexus. The idea is that your bot already traded wherever it trades, and it mirrors that trade into Nexus.\n- **It isn't a way to pick your own fill.** The server prices every fill from the live market when your request arrives. You can't send a time.\n- **It isn't a market data feed.** It tells you what you can trade and what you hold. It doesn't stream quotes.\n- **Test orders** (`\"test\": true`) are checked and priced like real ones, then kept in a test log instead of being placed. Use them to rehearse your bot before it trades for real.\n\nAll tickers, prices, ids and times in the examples below are made up to show the shape of a call. They aren't real fills and they aren't results.\n\n## What you need\n\nA Skylit API key (make one under API keys) and a Skylit account that includes Nexus. Futures also need futures paper trading on your account. Call `GET /api/nexus/v1/trading/capabilities` first: it tells your bot what this key can trade right now, so it never has to guess.\n\n## Auth\n\nSend your key on every call as `Authorization: Bearer YOUR_SKYLIT_API_KEY`. An `X-API-Key` header works too, and if you send both, `Authorization` wins. A key only ever sees and trades its owner's trades and accounts. An id that belongs to someone else answers `404`, the same as an id that doesn't exist. A key you revoke stops working here within about a minute.\n\n## Requests and responses\n\n- Send JSON, one object per request, 8 KB at most.\n- Unknown fields are refused. A typo like `quantitty` gets `400 bad_request` naming the field. It's never silently ignored.\n- Success answers `{\"data\": ..., \"meta\": ...}`. `meta` is left out when there's nothing to add.\n- A failure answers `{\"error\": {\"code\": \"...\", \"message\": \"...\"}}`. Branch on `code`. The `message` is written for a person and can change.\n- Responses are never cached (`Cache-Control: no-store`).\n\n## Rate limits\n\nEvery request counts, refused ones included, so hammering a refused call keeps you throttled.\n\n| Limit | Applies to | Amount |\n|---|---|---|\n| Writes per key | POSTs from one key | 30 per minute |\n| Reads per key | GETs from one key | 120 per minute |\n| Writes per member | POSTs across all your keys | 60 per minute |\n| Reads per member | GETs across all your keys | 240 per minute |\n| Burst | POSTs across all your keys | 5 in any 5 seconds |\n| Per network client | Every request, before the key is checked | 300 per minute |\n\nEach answer carries `X-RateLimit-Limit` and `X-RateLimit-Remaining` for your per-key limit (writes on a POST, reads on a GET). Over a limit you get `429 rate_limited` with a `Retry-After` header in seconds. Your key's general Skylit API limit applies too, with the same `429`.\n\nYou can hold at most **50 open options and stock positions opened through the API**. The 51st open answers `409 open_position_limit`. Futures positions don't count toward it.\n\n## Retries and clientOrderId\n\nIf your bot sends an order and never hears back, it can't tell whether the order filled. Send a `clientOrderId` you make up and retry with the same one: you get the first order back and nothing new is placed.\n\n- 1 to 64 letters, digits, or `_ . : -`, in the body as `clientOrderId` or in an `Idempotency-Key` header. If you send both they must match.\n- Remembered for 24 hours, per member across all your keys, in one id space for options, stocks and futures.\n- A repeat answers `200` with the original and `meta.idempotentReplay: true`. A repeat while the first copy is still running answers `409 request_in_progress` with `Retry-After: 1`. The same id on a different kind of request answers `409 client_order_id_used`.\n- Test orders have their own id space, so a bot can go from test mode to live without changing how it makes ids.\n- A futures close that finds nothing to close doesn't use up its id.\n- Got `500 internal_error` on an order you sent with a `clientOrderId`? Retry with the same id. It can't fill twice.\n\n## Time rules\n\nYou never send a time. The fill time is the server's clock when your request arrives.\n\n- **Stocks and most options** fill 09:30 to 16:00 ET. SPY, QQQ and IWM options that aren't expiring today run to 16:15. SPX, SPXW, XSP, RUT, RUTW, VIX and VIXW options that aren't expiring today run to 17:00. Early-close days end at 13:00 (13:15 for those SPY, QQQ and IWM options). Weekends and US market holidays are closed.\n- **Futures** trade Sunday 18:00 ET to Friday 17:00 ET, with a break from 17:00 to 18:00 ET each day. Exchange holidays aren't modelled: on one the session reads as open, there's no live price, and orders answer `503 no_live_price`.\n- Outside those hours an order answers `422 market_closed` and nothing fills. It isn't queued for the open.\n\n## Price rules\n\nThe server prices the fill, for every asset class.\n\n| Asset class | A buy or an open fills at | A sell or a close fills at |\n|---|---|---|\n| Options | the live ask | the live bid |\n| Stocks | the live price | the live price |\n| Futures | the last trade, one tick worse for you | the last trade, one tick worse for you |\n\nA fill needs a live price. When the quote is too old you get `503 stale_quote`, and with no live price `503 no_live_price`. Futures market orders that open or add need a trade printed in the last 15 seconds. All of these are safe to retry after a moment.\n\n**Your own price (options and stocks only).** If your bot filled somewhere else, send `price` and Nexus records it, but only inside a small window: `bid - tolerance <= price <= ask + tolerance`. For options the tolerance is the larger of 2 ticks or 1% of the mid. For stocks it's the larger of 0.02 or 0.1% of the price. Outside the window, `ifOutside: \"reject\"` (the default) answers `422 price_outside_market`, and `ifOutside: \"market\"` fills at the server's price instead. `meta.fill.priceSource` says which one was used.\n\n**Futures take no fill price.** A market order fills at the price the server sees. A limit or stop order carries the price it rests at, and fills when the market trades through it, the same as an order from the Nexus futures ticket. An API order can never fill better than the same order placed by hand.\n\n## Not available yet\n\nStop-limit orders, limit or stop orders for options and stocks, changing a resting order's size (cancel it and place a new one), adding to an open options or stock position, selling options to open, trading a challenge entry, a push feed of fills, and creating or resetting accounts. Do those in Nexus.",
+    "description": "## What it is\n\nThe Nexus Trades API lets your own bot open, trim, close and read your Nexus trades with your Skylit API key. Options and stock orders go to your Nexus paper wallet. Futures orders go to your practice account, or to an evaluation or funded account you name. Every order goes through the same checks, the same live prices and the same account rules as an order you place by hand in Nexus.\n\n- **It never sends trades to a broker.** Nothing here reaches a real market, even if you've connected a broker to Nexus. The idea is that your bot already traded wherever it trades, and it mirrors that trade into Nexus.\n- **It isn't a way to pick your own fill.** The server prices every fill from the live market when your request arrives. You can't send a time.\n- **It isn't a market data feed.** It tells you what you can trade and what you hold. It doesn't stream quotes.\n- **Test orders** (`\"test\": true`) are checked and priced like real ones, then kept in a test log instead of being placed. Use them to rehearse your bot before it trades for real.\n\nAll tickers, prices, ids and times in the examples below are made up to show the shape of a call. They aren't real fills and they aren't results.\n\n## What you need\n\nA Skylit API key (make one under API keys) and a Skylit account that includes Nexus. Futures also need futures paper trading on your account. Call `GET /api/nexus/v1/trading/capabilities` first: it tells your bot what this key can trade right now, so it never has to guess.\n\n## Auth\n\nSend your key on every call as `Authorization: Bearer YOUR_SKYLIT_API_KEY`. An `X-API-Key` header works too, and if you send both, `Authorization` wins. A key only ever sees and trades its owner's trades and accounts. An id that belongs to someone else answers `404`, the same as an id that doesn't exist. A key you revoke stops working here within about a minute.\n\n## Requests and responses\n\n- Send JSON, one object per request, 8 KB at most.\n- Unknown fields are refused. A typo like `quantitty` gets `400 bad_request` naming the field. It's never silently ignored.\n- Success answers `{\"data\": ..., \"meta\": ...}`. `meta` is left out when there's nothing to add.\n- A failure answers `{\"error\": {\"code\": \"...\", \"message\": \"...\"}}`. Branch on `code`. The `message` is written for a person and can change.\n- Responses are never cached (`Cache-Control: no-store`).\n\n## Rate limits\n\nEvery request counts, refused ones included, so hammering a refused call keeps you throttled.\n\n| Limit | Applies to | Amount |\n|---|---|---|\n| Writes per key | POSTs from one key | 30 per minute |\n| Reads per key | GETs from one key | 120 per minute |\n| Writes per member | POSTs across all your keys | 60 per minute |\n| Reads per member | GETs across all your keys | 240 per minute |\n| Burst | POSTs across all your keys | 5 in any 5 seconds |\n| Per network client | Every request, before the key is checked | 300 per minute |\n\nEach answer carries `X-RateLimit-Limit` and `X-RateLimit-Remaining` for your per-key limit (writes on a POST, reads on a GET). Over a limit you get `429 rate_limited` with a `Retry-After` header in seconds. Your key's general Skylit API limit applies too, with the same `429`.\n\nYou can hold at most **50 open options and stock positions opened through the API**. The 51st open answers `409 open_position_limit`. Resting options and stock opens you placed through the API count toward it too. On top of that, up to 50 options and stock orders can rest through the API at once (`409 working_order_limit`). Futures positions don't count toward either.\n\n## Retries and clientOrderId\n\nIf your bot sends an order and never hears back, it can't tell whether the order filled. Send a `clientOrderId` you make up and retry with the same one: you get the first order back and nothing new is placed.\n\n- 1 to 64 letters, digits, or `_ . : -`, in the body as `clientOrderId` or in an `Idempotency-Key` header. If you send both they must match.\n- Remembered for 24 hours, per member across all your keys, in one id space for options, stocks and futures.\n- A repeat answers `200` with the original and `meta.idempotentReplay: true`. A repeat while the first copy is still running answers `409 request_in_progress` with `Retry-After: 1`. The same id on a different kind of request answers `409 client_order_id_used`.\n- Test orders have their own id space, so a bot can go from test mode to live without changing how it makes ids.\n- A futures close that finds nothing to close doesn't use up its id.\n- Got `500 internal_error` on an order you sent with a `clientOrderId`? Retry with the same id. It can't fill twice.\n\n## Time rules\n\nYou never send a time. The fill time is the server's clock when your request arrives.\n\n- **Stocks and most options** fill 09:30 to 16:00 ET. SPY, QQQ and IWM options that aren't expiring today run to 16:15. SPX, SPXW, XSP, RUT, RUTW, VIX and VIXW options that aren't expiring today run to 17:00. Early-close days end at 13:00 (13:15 for those SPY, QQQ and IWM options). Weekends and US market holidays are closed.\n- **Futures** trade Sunday 18:00 ET to Friday 17:00 ET, with a break from 17:00 to 18:00 ET each day. Exchange holidays aren't modelled: on one the session reads as open, there's no live price, and orders answer `503 no_live_price`.\n- Outside those hours an order answers `422 market_closed` and nothing fills. It isn't queued for the open.\n\n## Price rules\n\nThe server prices the fill, for every asset class.\n\n| Asset class | A buy or an open fills at | A sell or a close fills at |\n|---|---|---|\n| Options | the live ask | the live bid |\n| Stocks | the live price | the live price |\n| Futures | the last trade, one tick worse for you | the last trade, one tick worse for you |\n\nA fill needs a live price. When the quote is too old you get `503 stale_quote`, and with no live price `503 no_live_price`. Futures market orders that open or add need a trade printed in the last 15 seconds. All of these are safe to retry after a moment.\n\n**Your own price (options and stocks only).** If your bot filled somewhere else, send `price` and Nexus records it, but only inside a small window: `bid - tolerance <= price <= ask + tolerance`. For options the tolerance is the larger of 2 ticks or 1% of the mid. For stocks it's the larger of 0.02 or 0.1% of the price. Outside the window, `ifOutside: \"reject\"` (the default) answers `422 price_outside_market`, and `ifOutside: \"market\"` fills at the server's price instead. `meta.fill.priceSource` says which one was used.\n\n**Futures take no fill price.** A market order fills at the price the server sees. A limit or stop order carries the price it rests at, and fills when the market trades through it, the same as an order from the Nexus futures ticket. An API order can never fill better than the same order placed by hand.\n\n**Resting options and stock orders** run on the same engine as the Options Desk in Nexus, so they fill the same way:\n\n| Order | Fills when | Fills at |\n|---|---|---|\n| Options limit buy | the ask comes down to your limit | the ask |\n| Options limit sell | the bid comes up to your limit | the bid |\n| Options stop-loss or target | the stock trades through your level | the option's live bid |\n| Stock limit buy | a trade prints at or under your limit | that trade's price |\n| Stock limit sell | a trade prints at or over your limit | that trade's price |\n| Stock stop | a trade prints through your stop | the next trade after it |\n\nNothing fills on a quote older than 15 seconds, never at mid, and only while the market's open for that contract. A limit the market's already through when you send it fills right away, at the quote.\n\n## Order types at a glance\n\n| Asset class | Open | Close |\n|---|---|---|\n| Options | `market`, `limit` | `market`, `limit`, a stop-loss and take-profit on the stock's price |\n| Stocks | `market`, `limit`, `stop` | `market`, `limit`, `stop` |\n| Futures | `market`, `limit`, `stop`, `stop_limit`, with an optional bracket | the close route, or the opposite side with `reduceOnly` |\n\nCall `GET /api/nexus/v1/trading/capabilities` to see which of these your key has right now.\n\n## Your bot's agent account\n\nAdd `\"account\": \"agent\"` to any order and it goes to your bot's own practice account instead of yours. It has its own paper wallet for options and stocks and its own futures account, trades on the same engine and rules, and never counts anywhere public: no leaderboards, ranks, profile stats, feed, copy trading or Discord. Only you can see it.\n\n- Read its trades with `GET /api/nexus/v1/trades?account=agent`, and its futures with `?assetClass=futures&account=agent`.\n- Check its cash with `GET /api/nexus/v1/trading/wallets/agent`, and yours with `.../wallets/main`.\n- Its futures account is `agent` on every account route.\n\n## Not available yet\n\nLimit or stop orders on an add, a stop-loss attached to an options entry (open first, then send the stop), stop-limit orders for options and stocks, selling options to open, trading a challenge entry, a push feed of fills, and creating or resetting accounts. Do those in Nexus.",
     "contact": {
       "name": "Skylit support",
       "email": "support@skylit.ai"
@@ -27,23 +27,27 @@
   "tags": [
     {
       "name": "Account and capabilities",
-      "description": "Start here. One call tells your bot which asset classes, order types, futures contracts and accounts this key can trade right now."
+      "description": "Start here. One call tells your bot which asset classes, order types, futures contracts and accounts this key can trade right now. The wallet read tells it how much paper cash it's got to size a trade."
     },
     {
       "name": "Options and stocks",
-      "description": "Open a trade, trim or close it, and read your trades. Options are bought to open and every order is a market order. The same open route takes futures too (see Futures)."
+      "description": "Open a trade, add to it, trim or close it, and read your trades. Options are bought to open. Market orders fill now. An options limit, or a stock limit or stop, rests on your wallet until the market gets there (see Options and stocks resting orders). The same open route takes futures too (see Futures)."
+    },
+    {
+      "name": "Options and stocks resting orders",
+      "description": "Options limit orders, stock limit and stop orders, and options stop-losses and targets. Place them with the open and exit routes, then see what rests, read one, change it, or cancel one or all here. They live on the wallet they trade on: `{book}` is `main` (your paper wallet) or `agent` (your bot's). The main wallet's list shows orders you placed on the Options Desk in Nexus too, since they rest on the same money."
     },
     {
       "name": "Futures",
-      "description": "Open a futures order with [`POST /api/nexus/v1/trades`](#post-api-nexus-v1-trades) and `\"assetClass\": \"futures\"`: pick the futures example there. It goes to your practice account unless `account` names an evaluation or funded account. Then close or flatten, and read the account and its order history here. Evaluation and funded accounts keep every rule they have in Nexus: the daily loss limit, the max loss, the contract cap."
+      "description": "Open a futures order with [`POST /api/nexus/v1/trades`](#post-api-nexus-v1-trades) and `\"assetClass\": \"futures\"`: pick the futures example there. It goes to your practice account unless `account` names your bot's `agent` account, an evaluation or a funded account. Then close or flatten, and read the account, its order history, and its positions and closed trades (`GET /api/nexus/v1/trades?assetClass=futures`). Evaluation and funded accounts keep every rule they have in Nexus: the daily loss limit, the max loss, the contract cap."
     },
     {
       "name": "Futures resting orders",
-      "description": "Limit orders, stop orders and brackets. Place them with the open route (`orderType`, `limitPrice`, `stopPrice`, `stopLoss`, `takeProfit`, `trailingStop`), then see what rests, read one, move its price, or cancel one or all. A resting order fills when the market trades through it, the same as on the Nexus futures ticket. Its price is where it rests, never where it fills."
+      "description": "Limit, stop and stop-limit orders, and brackets. Place them with the open route (`orderType`, `limitPrice`, `stopPrice`, `stopLoss`, `takeProfit`, `trailingStop`), then see what rests, read one, move its price, change its size, or cancel one or all. A resting order fills when the market trades through it, the same as on the Nexus futures ticket. Its price is where it rests, never where it fills."
     },
     {
       "name": "Test orders",
-      "description": "Add `\"test\": true` to an open, an exit, a close or a cancel. The order is checked and priced like a real one against your real positions and the live market, then kept in your test log instead of being placed. It never moves a wallet or an account, and never shows up in stats, ranks, the feed or Discord.\n\n- `GET /api/nexus/v1/trades?test=true` lists your test log: your 10 newest test orders, newest first.\n- A test order's id works on the read, exit and cancel routes, and those act on the test log only. `\"test\": true` on a real order's id answers `404`, so a bot left in test mode can't touch a real order.\n- An options or stock test trade stays open in the log until you exit it, so your bot can rehearse open, trim and close. A futures test order is a standalone dry run: nothing ever fills a resting one, and it can't be moved.\n- On an evaluation or funded account a test order reads the loss rules as they were last judged instead of judging them again. `meta.notChecked` says so.\n- `clientOrderId` works on test orders too, in its own id space."
+      "description": "Add `\"test\": true` to an open, an exit, a close or a cancel. The order is checked and priced like a real one against your real positions and the live market, then kept in your test log instead of being placed. It never moves a wallet or an account, and never shows up in stats, ranks, the feed or Discord.\n\n- `GET /api/nexus/v1/trades?test=true` lists your test log: your 10 newest test orders, newest first.\n- A test order's id works on the read, exit and cancel routes, and those act on the test log only. `\"test\": true` on a real order's id answers `404`, so a bot left in test mode can't touch a real order.\n- An options or stock test trade stays open in the log until you exit it, so your bot can rehearse open, trim and close. A futures test order is a standalone dry run: nothing ever fills a resting one, and its price can't be moved, though you can rehearse a size change.\n- An options or stock test limit or stop is checked against your wallet and the live quote, then sits in the log as `working` and never fills. `meta.wouldFillNow` (with `meta.fillPrice`) says whether the real one would've filled right away, `meta.wouldRestBecause` why it would rest, and a stock stop says `meta.wouldTriggerNow`. A test limit or stop can't be modified (`400 test_modify_unavailable`): cancel it and send a new one.\n- A stop-loss sent on a test trade is checked and logged, and nothing is armed. `meta.wouldFireNow` says whether the stock's already through a level.\n- An add to a test trade's id is a test add.\n- On an evaluation or funded account a test order reads the loss rules as they were last judged instead of judging them again. `meta.notChecked` says so.\n- `clientOrderId` works on test orders too, in its own id space."
     }
   ],
   "paths": {
@@ -54,7 +58,7 @@
           "Account and capabilities"
         ],
         "summary": "What this key can trade right now",
-        "description": "The asset classes, order types, futures contracts and futures accounts this key can trade right now, plus your per-key limits. Call it when your bot starts, so it asks instead of guessing.\n\nOptions and stocks always list `market` as their only order type. The futures block is there only when your account has futures paper trading. When it doesn't, the futures entry under `assetClasses` says why. The first call creates your futures practice account if you don't have one yet, as Nexus does when you open the futures ticket.",
+        "description": "The asset classes, order types, futures contracts and futures accounts this key can trade right now, plus your per-key limits. Call it when your bot starts, so it asks instead of guessing.\n\n- `assetClasses` lists each asset class's order types. Options list `limit` when resting orders are on and `stop` when options stops are on. Stocks list `limit` and `stop` when stock resting orders are on.\n- `optionsOrders` and `stocksOrders` describe the resting orders: time in force, what can be modified, the order routes and `maxWorkingOrders`. `optionsOrders.stops` describes options stop-losses.\n- `adds` describes adding to a position. `agentAccount` and `wallets` describe your bot's agent account and the wallet read.\n\nThe futures block is there only when your account has futures paper trading. When it doesn't, the futures entry under `assetClasses` says why. The first call creates your futures practice account if you don't have one yet, as Nexus does when you open the futures ticket.",
         "responses": {
           "200": {
             "description": "What you can trade.",
@@ -78,14 +82,18 @@
                             "assetClass": "options",
                             "available": true,
                             "orderTypes": [
-                              "market"
+                              "market",
+                              "limit",
+                              "stop"
                             ]
                           },
                           {
                             "assetClass": "stocks",
                             "available": true,
                             "orderTypes": [
-                              "market"
+                              "market",
+                              "limit",
+                              "stop"
                             ]
                           },
                           {
@@ -94,7 +102,8 @@
                             "orderTypes": [
                               "market",
                               "limit",
-                              "stop"
+                              "stop",
+                              "stop_limit"
                             ]
                           }
                         ],
@@ -108,7 +117,8 @@
                           "orderTypes": [
                             "market",
                             "limit",
-                            "stop"
+                            "stop",
+                            "stop_limit"
                           ],
                           "bracket": [
                             "stopLoss",
@@ -116,8 +126,11 @@
                             "trailingStop"
                           ],
                           "modify": [
-                            "price"
+                            "price",
+                            "quantity",
+                            "stopPrice"
                           ],
+                          "list": "GET /api/nexus/v1/trades?assetClass=futures&account={account}",
                           "contracts": [
                             {
                               "root": "NQ",
@@ -155,6 +168,7 @@
                                 "close",
                                 "limit",
                                 "stop",
+                                "stop_limit",
                                 "bracket",
                                 "cancel",
                                 "modify"
@@ -174,6 +188,7 @@
                                 "close",
                                 "limit",
                                 "stop",
+                                "stop_limit",
                                 "bracket",
                                 "cancel",
                                 "modify"
@@ -184,6 +199,123 @@
                         "limits": {
                           "writesPerMinute": 30,
                           "readsPerMinute": 120
+                        },
+                        "agentAccount": {
+                          "account": "agent",
+                          "assetClasses": [
+                            "options",
+                            "stocks",
+                            "futures"
+                          ],
+                          "public": false,
+                          "description": "Your bot's practice account. It trades on the same engine and rules as your paper account, with its own paper money (the same starting balance as yours), so your own account never moves. Nothing on it ever counts: no leaderboards, ranks, seasons, Guild Wars, profile stats, feed, copy trading, Discord, challenges or evaluations. Only you can see it.",
+                          "reads": [
+                            "GET /api/nexus/v1/trades?account=agent",
+                            "GET /api/nexus/v1/trading/wallets/agent",
+                            "GET /api/nexus/v1/trading/wallets/agent/orders/working",
+                            "GET /api/nexus/v1/trading/accounts/agent",
+                            "GET /api/nexus/v1/trades?assetClass=futures&account=agent"
+                          ]
+                        },
+                        "wallets": {
+                          "read": "GET /api/nexus/v1/trading/wallets/{book}",
+                          "books": [
+                            "main",
+                            "agent"
+                          ]
+                        },
+                        "optionsOrders": {
+                          "orderTypes": [
+                            "limit"
+                          ],
+                          "timeInForce": [
+                            "day",
+                            "gtc"
+                          ],
+                          "open": "POST /api/nexus/v1/trades with \"orderType\": \"limit\" and limitPrice",
+                          "exit": "POST /api/nexus/v1/trades/{id}/exits with \"orderType\": \"limit\" and limitPrice",
+                          "modify": [
+                            "price",
+                            "quantity"
+                          ],
+                          "orders": [
+                            "GET /api/nexus/v1/trading/wallets/{book}/orders/working",
+                            "GET /api/nexus/v1/trading/wallets/{book}/orders/{orderId}",
+                            "POST /api/nexus/v1/trading/wallets/{book}/orders/{orderId}/cancel",
+                            "POST /api/nexus/v1/trading/wallets/{book}/orders/{orderId}/modify",
+                            "POST /api/nexus/v1/trading/wallets/{book}/orders/cancel"
+                          ],
+                          "maxWorkingOrders": 50,
+                          "stops": {
+                            "triggerOn": "underlying",
+                            "exit": "POST /api/nexus/v1/trades/{id}/exits with stopLoss and/or takeProfit (stock prices), or \"orderType\": \"stop\" and stopPrice",
+                            "fields": [
+                              "stopLoss",
+                              "takeProfit",
+                              "stopPrice",
+                              "quantity",
+                              "closeAll",
+                              "clientOrderId",
+                              "test"
+                            ],
+                            "fill": "a fired leg sells the covered contracts at the market, at the contract's live bid (quotes over 15 s old never fill; it retries)",
+                            "onEntry": false,
+                            "modify": [
+                              "price",
+                              "stopLoss",
+                              "takeProfit",
+                              "quantity"
+                            ],
+                            "expires": "it stays armed until it fires, you cancel it, or the contract expires"
+                          }
+                        },
+                        "stocksOrders": {
+                          "orderTypes": [
+                            "limit",
+                            "stop"
+                          ],
+                          "timeInForce": [
+                            "day",
+                            "gtc"
+                          ],
+                          "gtcDays": 90,
+                          "open": "POST /api/nexus/v1/trades with \"assetClass\": \"stocks\", \"orderType\": \"limit\" and limitPrice, or \"orderType\": \"stop\" and stopPrice",
+                          "exit": "POST /api/nexus/v1/trades/{id}/exits with \"orderType\": \"limit\" and limitPrice, or \"orderType\": \"stop\" and stopPrice",
+                          "shorts": true,
+                          "priceSource": "lastTrade",
+                          "fill": {
+                            "limit": "a buy fills when a trade prints at or under the limit, a sell at or over it, at that print",
+                            "stop": "a print through the stop triggers it; it fills at the next print after that one"
+                          },
+                          "maxQuoteAgeSeconds": 15,
+                          "modify": [
+                            "price",
+                            "quantity"
+                          ],
+                          "orders": [
+                            "GET /api/nexus/v1/trading/wallets/{book}/orders/working",
+                            "GET /api/nexus/v1/trading/wallets/{book}/orders/{orderId}",
+                            "POST /api/nexus/v1/trading/wallets/{book}/orders/{orderId}/cancel",
+                            "POST /api/nexus/v1/trading/wallets/{book}/orders/{orderId}/modify",
+                            "POST /api/nexus/v1/trading/wallets/{book}/orders/cancel"
+                          ],
+                          "maxWorkingOrders": 50
+                        },
+                        "adds": {
+                          "route": "POST /api/nexus/v1/trades/{id}/adds",
+                          "assetClasses": [
+                            "options",
+                            "stocks"
+                          ],
+                          "orderTypes": [
+                            "market"
+                          ],
+                          "maxPosition": {
+                            "options": 1000,
+                            "stocks": 100000
+                          },
+                          "price": "the live ask (options) or the live stock price, or your price when it's inside the market (price, ifOutside), as an open",
+                          "test": true
                         }
                       }
                     }
@@ -207,6 +339,78 @@
         }
       }
     },
+    "/api/nexus/v1/trading/wallets/{book}": {
+      "get": {
+        "operationId": "getWallet",
+        "tags": [
+          "Account and capabilities"
+        ],
+        "summary": "Read your options and stocks paper wallet",
+        "description": "How much paper cash your bot's got before it sizes a trade. `main` is your own paper wallet, `agent` is your bot's.\n\n- Every number is in cents, so `9927100` is $99,271.00.\n- `buyingPowerCents` is what you can spend on a new trade: your cash minus what resting buys hold back (`reservedCents`). A paper trade can't take you below zero.\n- `openMarketValueCents` and `equityCents` are left out when an open position hasn't been marked yet, instead of guessed.\n- `opened` is `false` until your first trade on that wallet. Until then you'll see the starting $100,000.\n\nYou only ever see your own wallets. It counts as a read.",
+        "parameters": [
+          {
+            "$ref": "#/components/parameters/Book"
+          }
+        ],
+        "responses": {
+          "200": {
+            "description": "The wallet.",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "type": "object",
+                  "properties": {
+                    "data": {
+                      "$ref": "#/components/schemas/Wallet"
+                    }
+                  }
+                },
+                "examples": {
+                  "default": {
+                    "summary": "Your bot's agent wallet: two trades open and one resting buy.",
+                    "value": {
+                      "data": {
+                        "book": "agent",
+                        "currency": "USD",
+                        "asOf": "2026-10-12T14:45:00Z",
+                        "opened": true,
+                        "startingCashCents": 10000000,
+                        "cashCents": 9927100,
+                        "buyingPowerCents": 9887100,
+                        "reservedCents": 40000,
+                        "realizedPnlCents": 12400,
+                        "openPositions": 2,
+                        "openCostBasisCents": 85300,
+                        "openMarketValueCents": 91200,
+                        "equityCents": 10018300
+                      }
+                    }
+                  }
+                }
+              }
+            }
+          },
+          "400": {
+            "$ref": "#/components/responses/BadRequest"
+          },
+          "401": {
+            "$ref": "#/components/responses/Unauthorized"
+          },
+          "403": {
+            "$ref": "#/components/responses/Forbidden"
+          },
+          "429": {
+            "$ref": "#/components/responses/RateLimited"
+          },
+          "500": {
+            "$ref": "#/components/responses/InternalError"
+          },
+          "503": {
+            "$ref": "#/components/responses/Unavailable"
+          }
+        }
+      }
+    },
     "/api/nexus/v1/trades": {
       "post": {
         "operationId": "openTrade",
@@ -214,7 +418,7 @@
           "Options and stocks"
         ],
         "summary": "Open a trade (options, stocks or futures)",
-        "description": "One route for every asset class. `assetClass` picks the book.\n\n- **Options** are bought to open, at market. Send `contract` as shorthand (like `SPY 600C 10/16`), or `ticker`, `strike`, `direction` and `expiration`. Not both. 1 to 1,000 contracts.\n- **Stocks** take `ticker`, `side` (`buy` or `sell`) and `quantity`, 1 to 100,000 shares, at market.\n- **Futures** take `ticker` (a product like `NQ` for the front month, or one contract like `NQZ26`), `side`, `quantity` (1 to 100) and optionally `account`. A market order fills now. `orderType: \"limit\"` with `limitPrice`, or `\"stop\"` with `stopPrice`, rests until the market trades through it. Add `stopLoss`, `takeProfit` and `trailingStop` for a bracket on any order type: each leg is an order of its own, `held` while the entry rests and `working` once it fills. A resting order can wait on a quiet market. A market order needs a trade in the last 15 seconds to open or add.\n- **reduceOnly** stops a sell from opening a short when a stop already took you flat a second earlier. With `reduceOnly: true` the order goes through only if it shrinks what you hold, checked when it books. Otherwise it answers `422 reduce_only_would_open` and nothing is placed. It works on a market order with no bracket.\n- Futures go to your practice account unless `account` names another: `\"evaluation\"` or `\"funded\"` when you have exactly one running, or an account id from capabilities. Evaluation and funded accounts keep all their rules (daily loss, max loss, contract cap). Challenge entries can't be traded through the API.\n- Add `\"test\": true` to check and price the order without placing it. See Test orders in the intro.\n\nA new options or stock trade answers `201` with the trade. A futures order answers `201` with the order and its bracket. A repeated `clientOrderId` answers `200` with the first one.",
+        "description": "One route for every asset class. `assetClass` picks the book.\n\n- **Options** are bought to open. Send `contract` as shorthand (like `SPY 600C 10/16`), or `ticker`, `strike`, `direction` and `expiration`. Not both. 1 to 1,000 contracts. A market order fills now at the ask. `\"orderType\": \"limit\"` with `limitPrice` rests at your price: it fills when the ask comes down to your limit, at the ask. `timeInForce` is `day` (until 4:00 pm ET; sent after the close, it works the next session) or `gtc` (until 4:00 pm ET on the contract's last trading day).\n- **Stocks** take `ticker`, `side` (`buy` or `sell`, where `sell` opens a short) and `quantity`, 1 to 100,000 shares. A market order fills now at the last trade, and refuses a price more than 15 seconds old (`503 stale_quote`). `\"orderType\": \"limit\"` with `limitPrice` fills when a trade prints at or through your limit, at that trade's price. `\"orderType\": \"stop\"` with `stopPrice` waits for a trade through your stop, then fills at the next trade. Resting stock orders only fill between 9:30 am and 4:00 pm ET (1:00 pm on early-close days), and `gtc` works for 90 days.\n- **A resting options or stock open holds back buying power** (contracts x limit x 100, or shares x limit or stop, a short included) until it fills, is cancelled or expires. It answers `201` with the order (`\"status\": \"working\"`). If the market's already through your price it fills right away, with `\"status\": \"filled\"`, `fillPrice`, `tradeId` and `meta.fill`. Manage it with the Options and stocks resting orders routes. A limit or stop fill isn't posted to Discord and isn't copied.\n- **Futures** take `ticker` (a product like `NQ` for the front month, or one contract like `NQZ26`), `side`, `quantity` (1 to 100) and optionally `account`. A market order fills now. `orderType: \"limit\"` with `limitPrice`, or `\"stop\"` with `stopPrice`, rests until the market trades through it. `\"stop_limit\"` takes both: nothing happens until a trade hits your stop, then it works as a limit at `limitPrice` and only fills at that price or better. A buy's limit has to be at or above its stop, a sell's at or below. Add `stopLoss`, `takeProfit` and `trailingStop` for a bracket on any order type: each leg is an order of its own, `held` while the entry rests and `working` once it fills. A resting order can wait on a quiet market. A market order needs a trade in the last 15 seconds to open or add.\n- **reduceOnly** stops a sell from opening a short when a stop already took you flat a second earlier. With `reduceOnly: true` the order goes through only if it shrinks what you hold, checked when it books. Otherwise it answers `422 reduce_only_would_open` and nothing is placed. It works on a market order with no bracket.\n- Futures go to your practice account unless `account` names another: `\"agent\"` (your bot's account), `\"evaluation\"` or `\"funded\"` when you have exactly one running, or an account id from capabilities. Evaluation and funded accounts keep all their rules (daily loss, max loss, contract cap). Challenge entries can't be traded through the API.\n- **`\"account\": \"agent\"`** sends an options or stock order to your bot's own paper wallet instead of yours. It holds back the bot's buying power and its trades stay private.\n- Already hold the contract? Don't send a second open (`409 duplicate_position`, with `tradeId`): add to it with `POST /api/nexus/v1/trades/{id}/adds`. A limit buy on a contract you hold adds to that position when it fills.\n- Add `\"test\": true` to check and price the order without placing it. See Test orders in the intro.\n\nA new options or stock market trade answers `201` with the trade. A resting options or stock order answers `201` with the order. A futures order answers `201` with the order and its bracket. A repeated `clientOrderId` answers `200` with the first one.",
         "requestBody": {
           "required": true,
           "content": {
@@ -298,6 +502,61 @@
                     "quantity": 2,
                     "test": true
                   }
+                },
+                "options-limit": {
+                  "summary": "Options limit: buy 2 SPY 600 calls at 2.00 or better, good for the day.",
+                  "value": {
+                    "contract": "SPY 600C 10/16",
+                    "quantity": 2,
+                    "orderType": "limit",
+                    "limitPrice": 2,
+                    "clientOrderId": "spy-dip-0001"
+                  }
+                },
+                "stock-limit": {
+                  "summary": "Stock limit: buy 25 AAPL at 185.00 or better.",
+                  "value": {
+                    "assetClass": "stocks",
+                    "ticker": "AAPL",
+                    "side": "buy",
+                    "quantity": 25,
+                    "orderType": "limit",
+                    "limitPrice": 185,
+                    "clientOrderId": "aapl-dip-01"
+                  }
+                },
+                "stock-stop": {
+                  "summary": "Stock stop: go short 25 AAPL if it trades through 180.00, good till cancelled.",
+                  "value": {
+                    "assetClass": "stocks",
+                    "ticker": "AAPL",
+                    "side": "sell",
+                    "quantity": 25,
+                    "orderType": "stop",
+                    "stopPrice": 180,
+                    "timeInForce": "gtc"
+                  }
+                },
+                "futures-stop-limit": {
+                  "summary": "Futures stop-limit: buy 1 NQ once it trades 25350, but pay no more than 25355.",
+                  "value": {
+                    "assetClass": "futures",
+                    "ticker": "NQ",
+                    "side": "buy",
+                    "quantity": 1,
+                    "orderType": "stop_limit",
+                    "stopPrice": 25350,
+                    "limitPrice": 25355
+                  }
+                },
+                "agent": {
+                  "summary": "Agent account: 2 SPY 600 calls on your bot's own wallet, at market.",
+                  "value": {
+                    "contract": "SPY 600C 10/16",
+                    "quantity": 2,
+                    "account": "agent",
+                    "clientOrderId": "agent-0001"
+                  }
                 }
               }
             }
@@ -328,7 +587,7 @@
             }
           },
           "201": {
-            "description": "Filled (or, for a futures limit or stop order, resting). Options and stocks answer a `Trade`, futures a `FuturesOrder`. A test order is the same shape with `\"test\": true`.",
+            "description": "Filled, or resting. An options or stock market order answers a `Trade`, an options or stock limit or stop a `WalletOrder`, futures a `FuturesOrder`. A test order is the same shape with `\"test\": true`.",
             "content": {
               "application/json": {
                 "schema": {
@@ -584,6 +843,148 @@
                         }
                       }
                     }
+                  },
+                  "options-limit": {
+                    "summary": "The limit order, resting. It holds back 2 x 2.00 x 100 = $400 of buying power.",
+                    "value": {
+                      "data": {
+                        "id": "5b0e9a6c-3f1d-4c2e-9a7b-1d2e3f4a5b6c",
+                        "assetClass": "options",
+                        "source": "api",
+                        "book": "main",
+                        "clientOrderId": "spy-dip-0001",
+                        "ticker": "SPY",
+                        "strike": 600,
+                        "direction": "call",
+                        "expiration": "2026-10-16",
+                        "side": "buy",
+                        "positionEffect": "open",
+                        "quantity": 2,
+                        "filledQuantity": 0,
+                        "orderType": "limit",
+                        "timeInForce": "day",
+                        "status": "working",
+                        "limitPrice": 2,
+                        "reservedCents": 40000,
+                        "placedAt": "2026-10-12T14:31:07Z",
+                        "expiresAt": "2026-10-12T20:00:00Z"
+                      },
+                      "meta": {
+                        "clientOrderId": "spy-dip-0001"
+                      }
+                    }
+                  },
+                  "stock-limit": {
+                    "summary": "AAPL was already trading under the limit, so it filled right away at the last trade.",
+                    "value": {
+                      "data": {
+                        "id": "7d2f4a1b-6c3e-4f5a-8b9c-0d1e2f3a4b5c",
+                        "assetClass": "stocks",
+                        "source": "api",
+                        "book": "main",
+                        "clientOrderId": "aapl-dip-01",
+                        "ticker": "AAPL",
+                        "direction": "long",
+                        "side": "buy",
+                        "positionEffect": "open",
+                        "quantity": 25,
+                        "filledQuantity": 25,
+                        "orderType": "limit",
+                        "timeInForce": "day",
+                        "status": "filled",
+                        "limitPrice": 185,
+                        "fillPrice": 184.9,
+                        "tradeId": "9e8d7c6b-5a4f-4e3d-8c2b-1a0f9e8d7c6b",
+                        "reservedCents": 0,
+                        "placedAt": "2026-10-12T14:35:02Z",
+                        "filledAt": "2026-10-12T14:35:02Z",
+                        "expiresAt": "2026-10-12T20:00:00Z"
+                      },
+                      "meta": {
+                        "clientOrderId": "aapl-dip-01",
+                        "fill": {
+                          "price": 184.9,
+                          "quantity": 25,
+                          "priceSource": "market"
+                        }
+                      }
+                    }
+                  },
+                  "stock-stop": {
+                    "summary": "The short stop, resting. It holds back 25 x 180.00 = $4,500, the same as a buy.",
+                    "value": {
+                      "data": {
+                        "id": "1c2d3e4f-5a6b-4c7d-8e9f-0a1b2c3d4e5f",
+                        "assetClass": "stocks",
+                        "source": "api",
+                        "book": "main",
+                        "clientOrderId": "api-7e6d5c4b-3a2f-4e1d-9c0b-8a7f6e5d4c3b",
+                        "ticker": "AAPL",
+                        "direction": "short",
+                        "side": "sell",
+                        "positionEffect": "open",
+                        "quantity": 25,
+                        "filledQuantity": 0,
+                        "orderType": "stop",
+                        "timeInForce": "gtc",
+                        "status": "working",
+                        "stopPrice": 180,
+                        "reservedCents": 450000,
+                        "placedAt": "2026-10-12T14:36:10Z",
+                        "expiresAt": "2027-01-10T21:00:00Z"
+                      }
+                    }
+                  },
+                  "futures-stop-limit": {
+                    "summary": "The stop-limit, resting until a trade hits 25350.",
+                    "value": {
+                      "data": {
+                        "id": "c3d4e5f6-a7b8-4c9d-8e0f-1a2b3c4d5e6f",
+                        "assetClass": "futures",
+                        "source": "api",
+                        "account": {
+                          "id": "3c2b1a90-5e4d-4f3a-8b2c-1d0e9f8a7b6c",
+                          "kind": "practice",
+                          "name": "Paper"
+                        },
+                        "symbol": "NQZ26",
+                        "side": "buy",
+                        "quantity": 1,
+                        "role": "entry",
+                        "orderType": "stop_limit",
+                        "status": "working",
+                        "limitPrice": 25355,
+                        "stopPrice": 25350,
+                        "placedAt": "2026-10-12T14:40:00Z"
+                      }
+                    }
+                  },
+                  "agent": {
+                    "summary": "The trade, on your bot's agent wallet. It never shows anywhere public.",
+                    "value": {
+                      "data": {
+                        "id": "4a5b6c7d-8e9f-4a0b-9c1d-2e3f4a5b6c7d",
+                        "userId": "0b8e5d2c-41a7-4f6e-9c3b-7a1d2e4f5a60",
+                        "ticker": "SPY",
+                        "strike": 600,
+                        "expiration": "2026-10-16",
+                        "direction": "call",
+                        "assetClass": "options",
+                        "averageEntryPrice": 1.86,
+                        "totalQuantity": 2,
+                        "remainingQuantity": 2,
+                        "status": "active",
+                        "entryDate": "2026-10-12T14:41:30Z",
+                        "source": "api"
+                      },
+                      "meta": {
+                        "fill": {
+                          "price": 1.86,
+                          "priceSource": "market"
+                        },
+                        "clientOrderId": "agent-0001"
+                      }
+                    }
                   }
                 }
               }
@@ -623,9 +1024,31 @@
         "tags": [
           "Options and stocks"
         ],
-        "summary": "List your options and stock trades",
-        "description": "Your own options and stock trades, newest first. Futures aren't listed here: read them with the futures account and order history routes.\n\nWith `test=true` it lists your test log instead (your 10 newest test orders, futures ones included) and never a real trade.",
+        "summary": "List your trades",
+        "description": "Your own options and stock trades, newest first. `account=agent` lists your bot's agent wallet instead of yours.\n\n**Futures:** add `assetClass=futures` to list one futures account's trades. Leave `account` out for your practice account, or send `agent`, `evaluation`, `funded` or an account id. `status=open` lists the open positions with the same numbers as the account read. `status=closed` lists closed trades, flat to flat, with the same P/L your futures journal shows, newest first. Leave `status` out for both, open first. A futures row is a `FuturesTrade`, not a `Trade`. Without `assetClass=futures` the list is options and stocks, same as always.\n\nWith `test=true` it lists your test log instead (your 10 newest test orders, futures ones included) and never a real trade.",
         "parameters": [
+          {
+            "name": "assetClass",
+            "in": "query",
+            "required": false,
+            "description": "`futures` lists one futures account's positions and closed trades. Leave it out for options and stocks.",
+            "schema": {
+              "type": "string",
+              "enum": [
+                "futures"
+              ]
+            }
+          },
+          {
+            "name": "account",
+            "in": "query",
+            "required": false,
+            "description": "Options and stocks: `agent` lists your bot's wallet; leave it out for yours. Futures: `practice` (or left out), `agent`, `evaluation`, `funded` or an account id.",
+            "schema": {
+              "type": "string",
+              "example": "agent"
+            }
+          },
           {
             "name": "status",
             "in": "query",
@@ -727,6 +1150,68 @@
                         "offset": 0
                       }
                     }
+                  },
+                  "futures": {
+                    "summary": "assetClass=futures: one open NQ position and one closed MNQ trade in the practice account.",
+                    "value": {
+                      "data": [
+                        {
+                          "assetClass": "futures",
+                          "status": "open",
+                          "account": {
+                            "id": "3c2b1a90-5e4d-4f3a-8b2c-1d0e9f8a7b6c",
+                            "kind": "practice",
+                            "name": "Paper"
+                          },
+                          "symbol": "NQZ26",
+                          "side": "long",
+                          "quantity": 1,
+                          "avgPrice": 25310.25,
+                          "breakevenPrice": 25310.46,
+                          "markPrice": 25322.5,
+                          "openPnlCents": 24500,
+                          "pointValueCents": 2000,
+                          "tickSize": 0.25,
+                          "tripId": "d4e5f6a7-b8c9-4d0e-9f1a-2b3c4d5e6f7a"
+                        },
+                        {
+                          "assetClass": "futures",
+                          "status": "closed",
+                          "account": {
+                            "id": "3c2b1a90-5e4d-4f3a-8b2c-1d0e9f8a7b6c",
+                            "kind": "practice",
+                            "name": "Paper"
+                          },
+                          "symbol": "MNQZ26",
+                          "side": "short",
+                          "quantity": 2,
+                          "pointValueCents": 200,
+                          "tickSize": 0.25,
+                          "contracts": 2,
+                          "openedAt": "2026-10-09T15:02:11Z",
+                          "closedAt": "2026-10-09T15:20:47Z",
+                          "tradingDay": "2026-10-09",
+                          "grossCents": 6000,
+                          "feesCents": 248,
+                          "netCents": 5752,
+                          "scaleIns": 0,
+                          "bestPoints": 18.5,
+                          "worstPoints": -4.25,
+                          "tripId": "e5f6a7b8-c9d0-4e1f-8a2b-3c4d5e6f7a8b"
+                        }
+                      ],
+                      "meta": {
+                        "total": 2,
+                        "limit": 50,
+                        "offset": 0,
+                        "assetClass": "futures",
+                        "account": {
+                          "id": "3c2b1a90-5e4d-4f3a-8b2c-1d0e9f8a7b6c",
+                          "kind": "practice",
+                          "name": "Paper"
+                        }
+                      }
+                    }
                   }
                 }
               }
@@ -738,8 +1223,17 @@
           "401": {
             "$ref": "#/components/responses/Unauthorized"
           },
+          "403": {
+            "$ref": "#/components/responses/Forbidden"
+          },
+          "404": {
+            "$ref": "#/components/responses/NotFound"
+          },
           "429": {
             "$ref": "#/components/responses/RateLimited"
+          },
+          "503": {
+            "$ref": "#/components/responses/Unavailable"
           }
         }
       }
@@ -751,7 +1245,7 @@
           "Options and stocks"
         ],
         "summary": "Trim or close an options or stock trade",
-        "description": "Sell part of a trade with `quantity`, or all of what's left with `\"closeAll\": true`. Not both. Fills at market (the live bid for options), or at your own `price` inside the window, as on an open.\n\nOn a test order's id this is a test exit, whatever the body says. Futures have no exits: close a futures position with the account close route.",
+        "description": "Sell part of a trade with `quantity`, or all of what's left with `\"closeAll\": true`. Not both. Fills at market (the live bid for options), or at your own `price` inside the window, as on an open. On a short stock trade an exit buys it back.\n\n**Close at your price.** `\"orderType\": \"limit\"` with `limitPrice` (the least you'll take, or the most you'll pay to cover a short) rests until the market gets there: an option fills when the bid comes up to your limit, at the bid. A stock also takes `\"orderType\": \"stop\"` with `stopPrice`. Add `timeInForce` for `gtc`. It answers `201` with the order and `meta.tradeId`. You can't close more than the trade holds (`400 invalid_quantity`), and if you hold the same contract on more than one trade in that wallet, the fill closes the oldest first.\n\n**Protect an options trade.** Send `stopLoss`, `takeProfit` or both. They're prices of the **stock**, not the option: a stop at 585 on an SPY call fires when SPY trades at or under 585. On a call the stop sits under the stock's price and the target over it, on a put the other way round. Both together are one bracket order: whichever the stock reaches first fires and the other goes with it. When a level hits, the covered contracts sell at the market, at the option's live bid. With no live quote (nothing in the last 15 seconds) nothing sells and it tries again a few seconds later. It stays on until it fires, you cancel it, or the contract expires, so it takes no `timeInForce`. `\"orderType\": \"stop\"` with `stopPrice` works too, the same as `stopLoss` alone. It answers `201` with the order (`orderType` `stop`, `take_profit` or `bracket`, `\"triggerOn\": \"underlying\"`). `meta.underlyingPrice` is the stock's price now, and `meta.firesNow: true` means it's already through a level and fires on the next check. A stop goes on a trade you hold, never on an entry.\n\nOn a test order's id this is a test exit, whatever the body says. Futures have no exits: close a futures position with the account close route.",
         "parameters": [
           {
             "$ref": "#/components/parameters/TradeId"
@@ -779,6 +1273,33 @@
                   "summary": "Close the rest.",
                   "value": {
                     "closeAll": true
+                  }
+                },
+                "limit-exit": {
+                  "summary": "Close at your price: sell both at 2.50 or better, good till cancelled.",
+                  "value": {
+                    "closeAll": true,
+                    "orderType": "limit",
+                    "limitPrice": 2.5,
+                    "timeInForce": "gtc",
+                    "clientOrderId": "spy-tp-0001"
+                  }
+                },
+                "stock-stop-exit": {
+                  "summary": "Stock stop: sell 25 AAPL if it trades through 180.00.",
+                  "value": {
+                    "quantity": 25,
+                    "orderType": "stop",
+                    "stopPrice": 180
+                  }
+                },
+                "option-stop": {
+                  "summary": "Options bracket on the stock's price: out if SPY trades 585 or 610.",
+                  "value": {
+                    "stopLoss": 585,
+                    "takeProfit": 610,
+                    "closeAll": true,
+                    "clientOrderId": "spy-bracket-1"
                   }
                 }
               }
@@ -886,6 +1407,123 @@
               }
             }
           },
+          "201": {
+            "description": "A resting exit: a limit or stop to close, or an options stop-loss and target. The order, with `meta.tradeId`. Manage it with the Options and stocks resting orders routes.",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "type": "object",
+                  "properties": {
+                    "data": {
+                      "$ref": "#/components/schemas/WalletOrder"
+                    },
+                    "meta": {
+                      "$ref": "#/components/schemas/OrderMeta"
+                    }
+                  }
+                },
+                "examples": {
+                  "limit-exit": {
+                    "summary": "The sell, resting at 2.50. A close holds back no buying power.",
+                    "value": {
+                      "data": {
+                        "id": "8f9a0b1c-2d3e-4f5a-9b6c-7d8e9f0a1b2c",
+                        "assetClass": "options",
+                        "source": "api",
+                        "book": "main",
+                        "clientOrderId": "spy-tp-0001",
+                        "ticker": "SPY",
+                        "strike": 600,
+                        "direction": "call",
+                        "expiration": "2026-10-16",
+                        "side": "sell",
+                        "positionEffect": "close",
+                        "quantity": 2,
+                        "filledQuantity": 0,
+                        "orderType": "limit",
+                        "timeInForce": "gtc",
+                        "status": "working",
+                        "limitPrice": 2.5,
+                        "reservedCents": 0,
+                        "placedAt": "2026-10-12T15:02:44Z",
+                        "expiresAt": "2026-10-16T20:00:00Z"
+                      },
+                      "meta": {
+                        "clientOrderId": "spy-tp-0001",
+                        "tradeId": "6f1c2a4e-8b1d-4c39-9a51-2d7e0b3c9f10"
+                      }
+                    }
+                  },
+                  "stock-stop-exit": {
+                    "summary": "The sell stop, resting until AAPL trades through 180.00.",
+                    "value": {
+                      "data": {
+                        "id": "2b3c4d5e-6f7a-4b8c-9d0e-1f2a3b4c5d6e",
+                        "assetClass": "stocks",
+                        "source": "api",
+                        "book": "main",
+                        "clientOrderId": "api-0d9c8b7a-6f5e-4d3c-8b2a-1f0e9d8c7b6a",
+                        "ticker": "AAPL",
+                        "direction": "long",
+                        "side": "sell",
+                        "positionEffect": "close",
+                        "quantity": 25,
+                        "filledQuantity": 0,
+                        "orderType": "stop",
+                        "timeInForce": "day",
+                        "status": "working",
+                        "stopPrice": 180,
+                        "reservedCents": 0,
+                        "placedAt": "2026-10-12T15:04:10Z",
+                        "expiresAt": "2026-10-12T20:00:00Z"
+                      },
+                      "meta": {
+                        "tradeId": "9e8d7c6b-5a4f-4e3d-8c2b-1a0f9e8d7c6b"
+                      }
+                    }
+                  },
+                  "option-stop": {
+                    "summary": "The bracket, armed on SPY's price. SPY is at 598.40, so neither level has hit.",
+                    "value": {
+                      "data": {
+                        "id": "3c4d5e6f-7a8b-4c9d-8e0f-2a3b4c5d6e7f",
+                        "assetClass": "options",
+                        "source": "api",
+                        "book": "main",
+                        "clientOrderId": "spy-bracket-1",
+                        "ticker": "SPY",
+                        "strike": 600,
+                        "direction": "call",
+                        "expiration": "2026-10-16",
+                        "side": "sell",
+                        "positionEffect": "close",
+                        "quantity": 2,
+                        "filledQuantity": 0,
+                        "orderType": "bracket",
+                        "timeInForce": "gtc",
+                        "status": "working",
+                        "stopLoss": 585,
+                        "takeProfit": 610,
+                        "triggerOn": "underlying",
+                        "underlying": "SPY",
+                        "tradeId": "6f1c2a4e-8b1d-4c39-9a51-2d7e0b3c9f10",
+                        "reservedCents": 0,
+                        "placedAt": "2026-10-12T15:06:30Z"
+                      },
+                      "meta": {
+                        "clientOrderId": "spy-bracket-1",
+                        "tradeId": "6f1c2a4e-8b1d-4c39-9a51-2d7e0b3c9f10",
+                        "triggerOn": "underlying",
+                        "underlyingPrice": 598.4,
+                        "marketOpen": true,
+                        "firesNow": false
+                      }
+                    }
+                  }
+                }
+              }
+            }
+          },
           "400": {
             "$ref": "#/components/responses/BadRequest"
           },
@@ -903,6 +1541,120 @@
           },
           "429": {
             "$ref": "#/components/responses/RateLimited"
+          },
+          "503": {
+            "$ref": "#/components/responses/Unavailable"
+          }
+        }
+      }
+    },
+    "/api/nexus/v1/trades/{id}/adds": {
+      "post": {
+        "operationId": "addToTrade",
+        "tags": [
+          "Options and stocks"
+        ],
+        "summary": "Add to an open options or stock trade",
+        "description": "Already in a trade and want more? Send an add to the trade's id instead of a second open. A second open on the same contract answers `409 duplicate_position`, and its `tradeId` is the trade to add to.\n\n- It fills like an open: options at the live ask, stocks at the live price. Send `price` for your own price when it's inside the market, and `ifOutside` for what happens when it isn't, same as an open.\n- Your average, totals and P/L update exactly the way they do when you add in Nexus, and the paper wallet pays. A trade on your agent account pays from the agent wallet and stays private.\n- Market orders only. Each add is 1 to 1,000 contracts or 1 to 100,000 shares, and a position can't grow past that through the API (`409 position_size_limit`).\n- Not enough buying power is `422 insufficient_buying_power`. A quote older than 15 seconds is `503 stale_quote`: nothing was added, so try again in a moment.\n- Send a `clientOrderId`. If your bot retries, the add happens once and the repeat answers with the trade and `meta.idempotentReplay: true`.\n- An add to a test trade's id is a test add: checked and priced like a real one, and it only touches your test log. `\"test\": true` on a real trade adds nothing.\n\nIt answers `200` with the trade. `meta.fill` shows the price, how many you added and where the price came from.",
+        "parameters": [
+          {
+            "$ref": "#/components/parameters/TradeId"
+          },
+          {
+            "$ref": "#/components/parameters/IdempotencyKey"
+          }
+        ],
+        "requestBody": {
+          "required": true,
+          "content": {
+            "application/json": {
+              "schema": {
+                "$ref": "#/components/schemas/AddRequest"
+              },
+              "examples": {
+                "default": {
+                  "summary": "Add 2 more contracts at market.",
+                  "value": {
+                    "quantity": 2,
+                    "clientOrderId": "my-bot-add-0001"
+                  }
+                }
+              }
+            }
+          }
+        },
+        "responses": {
+          "200": {
+            "description": "The trade after the add, with `meta.fill`.",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "type": "object",
+                  "properties": {
+                    "data": {
+                      "$ref": "#/components/schemas/Trade"
+                    },
+                    "meta": {
+                      "$ref": "#/components/schemas/OrderMeta"
+                    }
+                  }
+                },
+                "examples": {
+                  "default": {
+                    "summary": "Added 2 at the live ask of 1.60. The average dropped from 1.84 to 1.72.",
+                    "value": {
+                      "data": {
+                        "id": "6f1c2a4e-8b1d-4c39-9a51-2d7e0b3c9f10",
+                        "userId": "0b8e5d2c-41a7-4f6e-9c3b-7a1d2e4f5a60",
+                        "ticker": "SPY",
+                        "strike": 600,
+                        "expiration": "2026-10-16",
+                        "direction": "call",
+                        "assetClass": "options",
+                        "averageEntryPrice": 1.72,
+                        "totalQuantity": 4,
+                        "remainingQuantity": 4,
+                        "status": "active",
+                        "entryDate": "2026-10-09T14:32:05Z",
+                        "source": "api"
+                      },
+                      "meta": {
+                        "fill": {
+                          "price": 1.6,
+                          "priceSource": "market",
+                          "quantity": 2
+                        },
+                        "clientOrderId": "my-bot-add-0001"
+                      }
+                    }
+                  }
+                }
+              }
+            }
+          },
+          "400": {
+            "$ref": "#/components/responses/BadRequest"
+          },
+          "401": {
+            "$ref": "#/components/responses/Unauthorized"
+          },
+          "403": {
+            "$ref": "#/components/responses/Forbidden"
+          },
+          "404": {
+            "$ref": "#/components/responses/NotFound"
+          },
+          "409": {
+            "$ref": "#/components/responses/Conflict"
+          },
+          "422": {
+            "$ref": "#/components/responses/Unprocessable"
+          },
+          "429": {
+            "$ref": "#/components/responses/RateLimited"
+          },
+          "500": {
+            "$ref": "#/components/responses/InternalError"
           },
           "503": {
             "$ref": "#/components/responses/Unavailable"
@@ -987,6 +1739,536 @@
           },
           "429": {
             "$ref": "#/components/responses/RateLimited"
+          }
+        }
+      }
+    },
+    "/api/nexus/v1/trading/wallets/{book}/orders/working": {
+      "get": {
+        "operationId": "listWalletWorkingOrders",
+        "tags": [
+          "Options and stocks resting orders"
+        ],
+        "summary": "See what's resting on a wallet",
+        "description": "Every options and stock order resting on that wallet, oldest first: limits, stock stops, and options stop-losses and targets. The main wallet's list shows orders you placed on the Options Desk in Nexus too. Yours carry `\"source\": \"api\"` and your `clientOrderId`.",
+        "parameters": [
+          {
+            "$ref": "#/components/parameters/Book"
+          }
+        ],
+        "responses": {
+          "200": {
+            "description": "The resting orders. `meta.count` is how many.",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "type": "object",
+                  "properties": {
+                    "data": {
+                      "type": "array",
+                      "items": {
+                        "$ref": "#/components/schemas/WalletOrder"
+                      }
+                    }
+                  }
+                },
+                "examples": {
+                  "default": {
+                    "summary": "One options limit buy resting on your paper wallet.",
+                    "value": {
+                      "data": [
+                        {
+                          "id": "5b0e9a6c-3f1d-4c2e-9a7b-1d2e3f4a5b6c",
+                          "assetClass": "options",
+                          "source": "api",
+                          "book": "main",
+                          "clientOrderId": "spy-dip-0001",
+                          "ticker": "SPY",
+                          "strike": 600,
+                          "direction": "call",
+                          "expiration": "2026-10-16",
+                          "side": "buy",
+                          "positionEffect": "open",
+                          "quantity": 2,
+                          "filledQuantity": 0,
+                          "orderType": "limit",
+                          "timeInForce": "day",
+                          "status": "working",
+                          "limitPrice": 2,
+                          "reservedCents": 40000,
+                          "placedAt": "2026-10-12T14:31:07Z",
+                          "expiresAt": "2026-10-12T20:00:00Z"
+                        }
+                      ],
+                      "meta": {
+                        "book": "main",
+                        "count": 1
+                      }
+                    }
+                  }
+                }
+              }
+            }
+          },
+          "400": {
+            "$ref": "#/components/responses/BadRequest"
+          },
+          "401": {
+            "$ref": "#/components/responses/Unauthorized"
+          },
+          "403": {
+            "$ref": "#/components/responses/Forbidden"
+          },
+          "404": {
+            "$ref": "#/components/responses/NotFound"
+          },
+          "429": {
+            "$ref": "#/components/responses/RateLimited"
+          },
+          "503": {
+            "$ref": "#/components/responses/Unavailable"
+          }
+        }
+      }
+    },
+    "/api/nexus/v1/trading/wallets/{book}/orders/{orderId}": {
+      "get": {
+        "operationId": "getWalletOrder",
+        "tags": [
+          "Options and stocks resting orders"
+        ],
+        "summary": "Read one options or stock order",
+        "description": "One order as it stands now, in any status: `working`, `filled`, `cancelled`, `rejected` or `expired`. `statusReason` says why when there's a reason.\n\nA filled order shows `fillPrice` and `tradeId`. A stock stop that's been set off shows `triggeredAt` and `triggerPrice`. An options stop that fired shows `firedLeg` (`stop_loss` or `take_profit`), `triggeredAt`, `triggerPrice` (the stock price that set it off), `fillPrice` (what the option sold for) and `fillOrderId`.",
+        "parameters": [
+          {
+            "$ref": "#/components/parameters/Book"
+          },
+          {
+            "$ref": "#/components/parameters/OrderId"
+          }
+        ],
+        "responses": {
+          "200": {
+            "description": "The order.",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "type": "object",
+                  "properties": {
+                    "data": {
+                      "$ref": "#/components/schemas/WalletOrder"
+                    }
+                  }
+                },
+                "examples": {
+                  "default": {
+                    "summary": "An options stop that fired: SPY traded 584.95, so the 2 calls sold at the bid of 0.95.",
+                    "value": {
+                      "data": {
+                        "id": "3c4d5e6f-7a8b-4c9d-8e0f-2a3b4c5d6e7f",
+                        "assetClass": "options",
+                        "source": "api",
+                        "book": "main",
+                        "clientOrderId": "spy-bracket-1",
+                        "ticker": "SPY",
+                        "strike": 600,
+                        "direction": "call",
+                        "expiration": "2026-10-16",
+                        "side": "sell",
+                        "positionEffect": "close",
+                        "quantity": 2,
+                        "filledQuantity": 2,
+                        "orderType": "bracket",
+                        "timeInForce": "gtc",
+                        "status": "filled",
+                        "stopLoss": 585,
+                        "takeProfit": 610,
+                        "triggerOn": "underlying",
+                        "underlying": "SPY",
+                        "firedLeg": "stop_loss",
+                        "triggeredAt": "2026-10-13T15:41:12Z",
+                        "triggerPrice": 584.95,
+                        "fillPrice": 0.95,
+                        "fillOrderId": "4d5e6f7a-8b9c-4d0e-9f1a-3b4c5d6e7f80",
+                        "tradeId": "6f1c2a4e-8b1d-4c39-9a51-2d7e0b3c9f10",
+                        "reservedCents": 0,
+                        "placedAt": "2026-10-12T15:06:30Z",
+                        "filledAt": "2026-10-13T15:41:13Z"
+                      }
+                    }
+                  }
+                }
+              }
+            }
+          },
+          "400": {
+            "$ref": "#/components/responses/BadRequest"
+          },
+          "401": {
+            "$ref": "#/components/responses/Unauthorized"
+          },
+          "404": {
+            "$ref": "#/components/responses/NotFound"
+          },
+          "429": {
+            "$ref": "#/components/responses/RateLimited"
+          }
+        }
+      }
+    },
+    "/api/nexus/v1/trading/wallets/{book}/orders/{orderId}/cancel": {
+      "post": {
+        "operationId": "cancelWalletOrder",
+        "tags": [
+          "Options and stocks resting orders"
+        ],
+        "summary": "Cancel one options or stock order",
+        "description": "Cancels a resting order and gives back the buying power it held. Safe to send twice: a second cancel answers `200` with `meta.alreadyCancelled: true`.\n\nAn order that's filled, expired or rejected answers `409 order_not_working`. A stock stop that's been set off, or an options stop whose sell is going through, answers `409 stop_triggered`: it's filling now. A test order's id cancels it in your test log only.",
+        "parameters": [
+          {
+            "$ref": "#/components/parameters/Book"
+          },
+          {
+            "$ref": "#/components/parameters/OrderId"
+          }
+        ],
+        "requestBody": {
+          "required": false,
+          "content": {
+            "application/json": {
+              "schema": {
+                "$ref": "#/components/schemas/TestFlag"
+              },
+              "examples": {
+                "default": {
+                  "summary": "No body needed.",
+                  "value": {}
+                }
+              }
+            }
+          }
+        },
+        "responses": {
+          "200": {
+            "description": "The order, cancelled.",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "type": "object",
+                  "properties": {
+                    "data": {
+                      "$ref": "#/components/schemas/WalletOrder"
+                    }
+                  }
+                },
+                "examples": {
+                  "default": {
+                    "summary": "The limit buy, cancelled. Its $400 is back in buying power.",
+                    "value": {
+                      "data": {
+                        "id": "5b0e9a6c-3f1d-4c2e-9a7b-1d2e3f4a5b6c",
+                        "assetClass": "options",
+                        "source": "api",
+                        "book": "main",
+                        "clientOrderId": "spy-dip-0001",
+                        "ticker": "SPY",
+                        "strike": 600,
+                        "direction": "call",
+                        "expiration": "2026-10-16",
+                        "side": "buy",
+                        "positionEffect": "open",
+                        "quantity": 2,
+                        "filledQuantity": 0,
+                        "orderType": "limit",
+                        "timeInForce": "day",
+                        "status": "cancelled",
+                        "limitPrice": 2,
+                        "reservedCents": 0,
+                        "placedAt": "2026-10-12T14:31:07Z",
+                        "expiresAt": "2026-10-12T20:00:00Z"
+                      }
+                    }
+                  }
+                }
+              }
+            }
+          },
+          "400": {
+            "$ref": "#/components/responses/BadRequest"
+          },
+          "401": {
+            "$ref": "#/components/responses/Unauthorized"
+          },
+          "404": {
+            "$ref": "#/components/responses/NotFound"
+          },
+          "409": {
+            "$ref": "#/components/responses/Conflict"
+          },
+          "429": {
+            "$ref": "#/components/responses/RateLimited"
+          },
+          "503": {
+            "$ref": "#/components/responses/Unavailable"
+          }
+        }
+      }
+    },
+    "/api/nexus/v1/trading/wallets/{book}/orders/{orderId}/modify": {
+      "post": {
+        "operationId": "modifyWalletOrder",
+        "tags": [
+          "Options and stocks resting orders"
+        ],
+        "summary": "Change a resting options or stock order",
+        "description": "Change a resting order in place. It keeps the same `id`.\n\n- **A limit:** `price` is the new limit, `quantity` the new size (up to 1,000 contracts or 100,000 shares), or both. A bigger buy has to fit your buying power or nothing changes (`422 insufficient_buying_power`). Move a buy above the ask and it fills right away, at the ask.\n- **A stock stop:** `price` is the new stop.\n- **An options stop:** `stopLoss`, `takeProfit` (stock prices), `quantity`, or `price` when it has only one level.\n\nAn order that's filled, expired or rejected answers `409 order_not_working`, and a stop that's already been set off answers `409 stop_triggered`. A test order can't be modified (`400 test_modify_unavailable`): cancel it and send a new one.",
+        "parameters": [
+          {
+            "$ref": "#/components/parameters/Book"
+          },
+          {
+            "$ref": "#/components/parameters/OrderId"
+          }
+        ],
+        "requestBody": {
+          "required": true,
+          "content": {
+            "application/json": {
+              "schema": {
+                "$ref": "#/components/schemas/WalletModifyRequest"
+              },
+              "examples": {
+                "limit": {
+                  "summary": "Move the limit buy to 1.90.",
+                  "value": {
+                    "price": 1.9
+                  }
+                },
+                "stop": {
+                  "summary": "Raise the options stop to 590 on SPY's price.",
+                  "value": {
+                    "stopLoss": 590
+                  }
+                }
+              }
+            }
+          }
+        },
+        "responses": {
+          "200": {
+            "description": "The order, changed.",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "type": "object",
+                  "properties": {
+                    "data": {
+                      "$ref": "#/components/schemas/WalletOrder"
+                    }
+                  }
+                },
+                "examples": {
+                  "limit": {
+                    "summary": "The limit buy at 1.90. It holds back $380 now.",
+                    "value": {
+                      "data": {
+                        "id": "5b0e9a6c-3f1d-4c2e-9a7b-1d2e3f4a5b6c",
+                        "assetClass": "options",
+                        "source": "api",
+                        "book": "main",
+                        "clientOrderId": "spy-dip-0001",
+                        "ticker": "SPY",
+                        "strike": 600,
+                        "direction": "call",
+                        "expiration": "2026-10-16",
+                        "side": "buy",
+                        "positionEffect": "open",
+                        "quantity": 2,
+                        "filledQuantity": 0,
+                        "orderType": "limit",
+                        "timeInForce": "day",
+                        "status": "working",
+                        "limitPrice": 1.9,
+                        "reservedCents": 38000,
+                        "placedAt": "2026-10-12T14:31:07Z",
+                        "expiresAt": "2026-10-12T20:00:00Z"
+                      }
+                    }
+                  },
+                  "stop": {
+                    "summary": "The bracket with its stop at 590.",
+                    "value": {
+                      "data": {
+                        "id": "3c4d5e6f-7a8b-4c9d-8e0f-2a3b4c5d6e7f",
+                        "assetClass": "options",
+                        "source": "api",
+                        "book": "main",
+                        "clientOrderId": "spy-bracket-1",
+                        "ticker": "SPY",
+                        "strike": 600,
+                        "direction": "call",
+                        "expiration": "2026-10-16",
+                        "side": "sell",
+                        "positionEffect": "close",
+                        "quantity": 2,
+                        "filledQuantity": 0,
+                        "orderType": "bracket",
+                        "timeInForce": "gtc",
+                        "status": "working",
+                        "stopLoss": 590,
+                        "takeProfit": 610,
+                        "triggerOn": "underlying",
+                        "underlying": "SPY",
+                        "tradeId": "6f1c2a4e-8b1d-4c39-9a51-2d7e0b3c9f10",
+                        "reservedCents": 0,
+                        "placedAt": "2026-10-12T15:06:30Z"
+                      }
+                    }
+                  }
+                }
+              }
+            }
+          },
+          "400": {
+            "$ref": "#/components/responses/BadRequest"
+          },
+          "401": {
+            "$ref": "#/components/responses/Unauthorized"
+          },
+          "404": {
+            "$ref": "#/components/responses/NotFound"
+          },
+          "409": {
+            "$ref": "#/components/responses/Conflict"
+          },
+          "422": {
+            "$ref": "#/components/responses/Unprocessable"
+          },
+          "429": {
+            "$ref": "#/components/responses/RateLimited"
+          },
+          "503": {
+            "$ref": "#/components/responses/Unavailable"
+          }
+        }
+      }
+    },
+    "/api/nexus/v1/trading/wallets/{book}/orders/cancel": {
+      "post": {
+        "operationId": "cancelAllWalletOrders",
+        "tags": [
+          "Options and stocks resting orders"
+        ],
+        "summary": "Cancel every resting order on a wallet",
+        "description": "`\"cancelAll\": true` cancels everything resting on the wallet, options stops included. `\"ticker\": \"SPY\"` cancels only that underlying's. It closes nothing: your positions stay open.\n\nA stock stop that's been set off, or an options stop that's firing, can't be cancelled. They're skipped and listed in `meta.stopsFilling`. `meta.nothingToCancel: true` means nothing was resting.",
+        "parameters": [
+          {
+            "$ref": "#/components/parameters/Book"
+          }
+        ],
+        "requestBody": {
+          "required": true,
+          "content": {
+            "application/json": {
+              "schema": {
+                "$ref": "#/components/schemas/WalletCancelRequest"
+              },
+              "examples": {
+                "all": {
+                  "summary": "Cancel everything resting on your paper wallet.",
+                  "value": {
+                    "cancelAll": true
+                  }
+                },
+                "ticker": {
+                  "summary": "Cancel only SPY's.",
+                  "value": {
+                    "ticker": "SPY"
+                  }
+                }
+              }
+            }
+          }
+        },
+        "responses": {
+          "200": {
+            "description": "What was cancelled. `meta.count` is how many.",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "type": "object",
+                  "properties": {
+                    "data": {
+                      "$ref": "#/components/schemas/WalletCancelled"
+                    }
+                  }
+                },
+                "examples": {
+                  "all": {
+                    "summary": "One limit buy cancelled.",
+                    "value": {
+                      "data": {
+                        "book": "main",
+                        "cancelled": [
+                          {
+                            "id": "5b0e9a6c-3f1d-4c2e-9a7b-1d2e3f4a5b6c",
+                            "assetClass": "options",
+                            "source": "api",
+                            "book": "main",
+                            "clientOrderId": "spy-dip-0001",
+                            "ticker": "SPY",
+                            "strike": 600,
+                            "direction": "call",
+                            "expiration": "2026-10-16",
+                            "side": "buy",
+                            "positionEffect": "open",
+                            "quantity": 2,
+                            "filledQuantity": 0,
+                            "orderType": "limit",
+                            "timeInForce": "day",
+                            "status": "cancelled",
+                            "limitPrice": 2,
+                            "reservedCents": 0,
+                            "placedAt": "2026-10-12T14:31:07Z",
+                            "expiresAt": "2026-10-12T20:00:00Z"
+                          }
+                        ]
+                      },
+                      "meta": {
+                        "book": "main",
+                        "count": 1
+                      }
+                    }
+                  },
+                  "ticker": {
+                    "summary": "Nothing on SPY was resting.",
+                    "value": {
+                      "data": {
+                        "book": "main",
+                        "cancelled": []
+                      },
+                      "meta": {
+                        "book": "main",
+                        "count": 0,
+                        "nothingToCancel": true
+                      }
+                    }
+                  }
+                }
+              }
+            }
+          },
+          "400": {
+            "$ref": "#/components/responses/BadRequest"
+          },
+          "401": {
+            "$ref": "#/components/responses/Unauthorized"
+          },
+          "429": {
+            "$ref": "#/components/responses/RateLimited"
+          },
+          "503": {
+            "$ref": "#/components/responses/Unavailable"
           }
         }
       }
@@ -1730,8 +3012,8 @@
         "tags": [
           "Futures resting orders"
         ],
-        "summary": "Move a resting order's price",
-        "description": "Moves a working limit or stop order (or a bracket's stop or target) to a new `price`, like dragging it on the Nexus chart. Only the price can change. To change the size, cancel the order and place a new one.\n\nNo live price answers `503 no_live_price` and the order stays where it was. A test order can't be moved (`400 test_modify_unavailable`): cancel it and send a new test order at the new price.",
+        "summary": "Move a resting order's price or change its size",
+        "description": "Send `price`, `quantity`, or both. Both change together or neither does.\n\n- **`price`** moves a working limit or stop order (or a bracket's stop or target), like dragging it on the Nexus chart. On a stop-limit, `price` is its limit and `stopPrice` its trigger. The trigger can't move once a trade has hit it.\n- **`quantity`** changes a resting entry's size, 1 to 100. Going up is checked like a new order of that size, your evaluation's contract cap included, and the order loses its place in line from that moment. Going down keeps its place. Your stop and target follow the new size, so you can't resize them on their own.\n- Futures orders fill all at once, so a filled order can't be resized, and 0 isn't a size: cancel the order instead.\n\nNo live price answers `503 no_live_price` and the order stays where it was. On a test order you can rehearse a size change with `quantity` alone. A test order's price can't be moved (`400 test_modify_unavailable`): cancel it and send a new test order at the new price.",
         "parameters": [
           {
             "$ref": "#/components/parameters/Account"
@@ -1753,6 +3035,19 @@
                   "value": {
                     "price": 25295
                   }
+                },
+                "size": {
+                  "summary": "Take the resting entry from 1 contract to 2.",
+                  "value": {
+                    "quantity": 2
+                  }
+                },
+                "stop-limit": {
+                  "summary": "Stop-limit: move the trigger to 25345 and the limit to 25350.",
+                  "value": {
+                    "stopPrice": 25345,
+                    "price": 25350
+                  }
                 }
               }
             }
@@ -1760,7 +3055,7 @@
         },
         "responses": {
           "200": {
-            "description": "The order at its new price, with its bracket.",
+            "description": "The order at its new price or size, with its bracket.",
             "content": {
               "application/json": {
                 "schema": {
@@ -1792,6 +3087,53 @@
                         "status": "working",
                         "limitPrice": 25295,
                         "placedAt": "2026-10-09T14:36:00Z"
+                      }
+                    }
+                  },
+                  "size": {
+                    "summary": "The entry, now 2 contracts. It's back of the line from now.",
+                    "value": {
+                      "data": {
+                        "id": "b2c3d4e5-f6a7-4b8c-9d0e-1f2a3b4c5d6e",
+                        "assetClass": "futures",
+                        "source": "api",
+                        "account": {
+                          "id": "8d7c6b5a-4e3f-4a2b-9c1d-0e1f2a3b4c5d",
+                          "kind": "evaluation",
+                          "name": "50K Evaluation"
+                        },
+                        "symbol": "NQZ26",
+                        "side": "buy",
+                        "quantity": 2,
+                        "role": "entry",
+                        "orderType": "limit",
+                        "status": "working",
+                        "limitPrice": 25295,
+                        "placedAt": "2026-10-09T14:36:00Z"
+                      }
+                    }
+                  },
+                  "stop-limit": {
+                    "summary": "The stop-limit with its new trigger and limit.",
+                    "value": {
+                      "data": {
+                        "id": "c3d4e5f6-a7b8-4c9d-8e0f-1a2b3c4d5e6f",
+                        "assetClass": "futures",
+                        "source": "api",
+                        "account": {
+                          "id": "3c2b1a90-5e4d-4f3a-8b2c-1d0e9f8a7b6c",
+                          "kind": "practice",
+                          "name": "Paper"
+                        },
+                        "symbol": "NQZ26",
+                        "side": "buy",
+                        "quantity": 1,
+                        "role": "entry",
+                        "orderType": "stop_limit",
+                        "status": "working",
+                        "limitPrice": 25350,
+                        "stopPrice": 25345,
+                        "placedAt": "2026-10-12T14:40:00Z"
                       }
                     }
                   }
@@ -2041,10 +3383,24 @@
         "name": "account",
         "in": "path",
         "required": true,
-        "description": "`practice`, `evaluation` or `funded` (when you have exactly one running), or a futures account id from capabilities.",
+        "description": "`practice`, `agent` (your bot's account), `evaluation` or `funded` (when you have exactly one running), or a futures account id from capabilities.",
         "schema": {
           "type": "string",
           "example": "practice"
+        }
+      },
+      "Book": {
+        "name": "book",
+        "in": "path",
+        "required": true,
+        "description": "`main` is your own paper wallet, `agent` is your bot's.",
+        "schema": {
+          "type": "string",
+          "enum": [
+            "main",
+            "agent"
+          ],
+          "example": "main"
         }
       },
       "OrderId": {
@@ -2070,7 +3426,7 @@
     },
     "responses": {
       "BadRequest": {
-        "description": "The request was refused before anything was traded. Codes: `bad_request`, `bad_contract`, `invalid_quantity`, `invalid_price`, `unsupported_asset_class`, `unsupported_order_type`, `only_market_orders`, `test_orders_unavailable`, `test_modify_unavailable`.",
+        "description": "The request was refused before anything was traded. Codes: `bad_request`, `bad_contract`, `invalid_quantity`, `invalid_price`, `unsupported_asset_class`, `unsupported_order_type`, `only_market_orders`, `limit_price_required` (a limit with no `limitPrice`), `invalid_limit_price` (not in cents, or outside 0.01 to 99,999.99 for options or 999,999.99 for stocks), `stop_price_required` (a stop with no `stopPrice`), `invalid_stop_price` (not in cents, or outside 0.01 to 999,999.99), `invalid_take_profit`, `test_orders_unavailable`, `test_modify_unavailable`.",
         "content": {
           "application/json": {
             "schema": {
@@ -2154,7 +3510,7 @@
         }
       },
       "Conflict": {
-        "description": "The order clashes with what you hold or sent before. Codes: `duplicate_position` (with `tradeId`), `trade_closed`, `open_position_limit`, `client_order_id_used`, `request_in_progress`, `account_locked`, `account_busy`, `account_ended`, `order_not_working`.",
+        "description": "The order clashes with what you hold or sent before. Codes: `duplicate_position` (with `tradeId`: add to it instead), `trade_closed`, `open_position_limit` (open positions plus resting opens through the API are at 50), `working_order_limit` (50 options and stock orders already resting through the API), `position_size_limit` (an add would take the position past 1,000 contracts or 100,000 shares), `client_order_id_used`, `request_in_progress`, `account_locked`, `account_busy`, `account_ended`, `order_not_working` (it already filled, expired, or was cancelled or rejected), `stop_triggered` (a stop that's been set off is filling now, so it can't be cancelled or changed).",
         "content": {
           "application/json": {
             "schema": {
@@ -2166,7 +3522,7 @@
                 "value": {
                   "error": {
                     "code": "duplicate_position",
-                    "message": "You already hold an open position on this contract. Close it first, or add to it in Nexus.",
+                    "message": "You already hold an open position on this contract. Add to it with POST /api/nexus/v1/trades/{id}/adds (the id is tradeId), or close it first.",
                     "tradeId": "6f1c2a4e-8b1d-4c39-9a51-2d7e0b3c9f10"
                   }
                 }
@@ -2176,7 +3532,7 @@
         }
       },
       "Unprocessable": {
-        "description": "Read fine, but the market or the account says no. Codes: `market_closed`, `contract_expired`, `contract_not_offered`, `price_outside_market`, `insufficient_buying_power`, `account_not_tradable`, `account_ambiguous`, `reduce_only_would_open`, `order_refused`.",
+        "description": "Read fine, but the market or the account says no. Codes: `market_closed`, `contract_expired`, `contract_not_offered`, `price_outside_market`, `insufficient_buying_power`, `account_not_tradable`, `account_ambiguous`, `reduce_only_would_open`, `order_refused`, `order_rejected` (a resting order that tried to fill right away and couldn't; `orderId` points to it). A resting order that can't be covered answers `insufficient_buying_power` with `orderId` too: it's recorded as rejected.",
         "content": {
           "application/json": {
             "schema": {
@@ -2259,7 +3615,7 @@
         }
       },
       "Unavailable": {
-        "description": "Try again in a moment (honour `Retry-After` when it's sent). Codes: `stale_quote`, `no_live_price`, `rules_pending`, `unavailable`, `auth_unavailable`, `access_check_unavailable`, `api_keys_unavailable`, `trades_api_disabled`.",
+        "description": "Try again in a moment (honour `Retry-After` when it's sent). Codes: `stale_quote` (the quote, or a stock's last trade, is more than 15 seconds old, so nothing filled), `no_live_price`, `rules_pending`, `unavailable`, `auth_unavailable`, `access_check_unavailable`, `api_keys_unavailable`, `trades_api_disabled`.",
         "headers": {
           "Retry-After": {
             "schema": {
@@ -2297,7 +3653,7 @@
         "properties": {
           "error": {
             "type": "object",
-            "description": "`code` is stable, so branch on it. `message` is for a person and can change. `tradeId` comes with `duplicate_position`: the trade you already hold.",
+            "description": "`code` is stable, so branch on it. `message` is for a person and can change. `tradeId` comes with `duplicate_position`: the trade you already hold. `orderId` comes with a resting order that was rejected as it was placed.",
             "required": [
               "code",
               "message"
@@ -2310,6 +3666,10 @@
                 "type": "string"
               },
               "tradeId": {
+                "type": "string",
+                "format": "uuid"
+              },
+              "orderId": {
                 "type": "string",
                 "format": "uuid"
               }
@@ -2386,18 +3746,28 @@
             "enum": [
               "market",
               "limit",
-              "stop"
+              "stop",
+              "stop_limit"
             ],
             "default": "market",
-            "description": "Options and stocks take `market` only. Futures also take `limit` (with `limitPrice`) and `stop` (with `stopPrice`)."
+            "description": "Options take `market` or `limit`. Stocks take `market`, `limit` or `stop`. Futures take `market`, `limit`, `stop` or `stop_limit` (with both `stopPrice` and `limitPrice`)."
           },
           "limitPrice": {
             "type": "number",
-            "description": "Futures limit orders: the price the order rests at."
+            "description": "A limit or stop-limit: the price the order rests at. Options and stocks in cents, like `2.45` (options up to 99,999.99, stocks up to 999,999.99)."
           },
           "stopPrice": {
             "type": "number",
-            "description": "Futures stop orders: the price that triggers it."
+            "description": "A stock stop, or a futures stop or stop-limit: the price that triggers it."
+          },
+          "timeInForce": {
+            "type": "string",
+            "enum": [
+              "day",
+              "gtc"
+            ],
+            "default": "day",
+            "description": "Options and stock limits and stops. `day` works until 4:00 pm ET (sent after the close, the next session). `gtc` works until the option's last trading day, or 90 days for a stock."
           },
           "stopLoss": {
             "type": "number",
@@ -2417,7 +3787,7 @@
           },
           "account": {
             "type": "string",
-            "description": "Futures: `practice` (the default), `evaluation`, `funded`, or an account id."
+            "description": "`agent` sends any order to your bot's own agent account. Futures also take `practice` (the default), `evaluation`, `funded`, or an account id. For options and stocks, leave it out for your own paper wallet."
           },
           "clientOrderId": {
             "type": "string",
@@ -2431,7 +3801,7 @@
       },
       "ExitRequest": {
         "type": "object",
-        "description": "Send `quantity` or `closeAll`, not both.",
+        "description": "Send `quantity` or `closeAll`, not both. A market exit can add `price` and `ifOutside`. A limit exit takes `limitPrice`, a stock stop exit `stopPrice`, and an options stop `stopLoss` and/or `takeProfit`.",
         "properties": {
           "quantity": {
             "type": "integer",
@@ -2457,10 +3827,37 @@
           "orderType": {
             "type": "string",
             "enum": [
-              "market"
+              "market",
+              "limit",
+              "stop"
             ],
             "default": "market",
-            "description": "Exits are market orders."
+            "description": "`limit` closes at your price. `stop` closes a stock when it trades through `stopPrice`, or arms an options stop on the stock's price."
+          },
+          "limitPrice": {
+            "type": "number",
+            "description": "A limit exit: the least you'll take per contract or share (the most you'll pay to cover a short)."
+          },
+          "stopPrice": {
+            "type": "number",
+            "description": "A stop exit. On a stock, the stock price that sets it off. On an option, the stock price the stop fires at, the same as `stopLoss`."
+          },
+          "timeInForce": {
+            "type": "string",
+            "enum": [
+              "day",
+              "gtc"
+            ],
+            "default": "day",
+            "description": "Limit and stock stop exits. An options stop stays on until it fires, you cancel it, or the contract expires, so it takes none."
+          },
+          "stopLoss": {
+            "type": "number",
+            "description": "Options only: the stock price your stop fires at. On a call it sits under the stock's price, on a put over it."
+          },
+          "takeProfit": {
+            "type": "number",
+            "description": "Options only: the stock price your target fires at. With `stopLoss` it's one bracket order."
           },
           "clientOrderId": {
             "type": "string",
@@ -2469,6 +3866,48 @@
           "test": {
             "type": "boolean",
             "description": "Optional. The trade decides: a test order's exit is always a test."
+          }
+        }
+      },
+      "AddRequest": {
+        "type": "object",
+        "required": [
+          "quantity"
+        ],
+        "description": "An add to an open options or stock trade, at market.",
+        "properties": {
+          "quantity": {
+            "type": "integer",
+            "description": "How many more: 1 to 1,000 contracts or 1 to 100,000 shares, and the position can't grow past that."
+          },
+          "price": {
+            "type": "number",
+            "description": "Your own fill price, taken only inside the window around the live quote."
+          },
+          "ifOutside": {
+            "type": "string",
+            "enum": [
+              "reject",
+              "market"
+            ],
+            "default": "reject",
+            "description": "What happens when `price` is outside the window."
+          },
+          "orderType": {
+            "type": "string",
+            "enum": [
+              "market"
+            ],
+            "default": "market",
+            "description": "Adds are market orders."
+          },
+          "clientOrderId": {
+            "type": "string",
+            "description": "Your own id for safe retries. A repeat answers the trade with `meta.idempotentReplay: true`."
+          },
+          "test": {
+            "type": "boolean",
+            "description": "Optional. The trade decides: an add to a test trade is a test add, and `true` on a real trade adds nothing."
           }
         }
       },
@@ -2514,17 +3953,421 @@
       },
       "ModifyRequest": {
         "type": "object",
-        "required": [
-          "price"
-        ],
+        "description": "Send `price`, `quantity`, `stopPrice`, or a mix. All of it changes or none does.",
         "properties": {
           "price": {
             "type": "number",
-            "description": "The order's new price, above 0."
+            "description": "The order's new price, above 0: where a limit, a target or a stop-limit's limit rests, or where a stop or a stop loss triggers."
+          },
+          "quantity": {
+            "type": "integer",
+            "description": "A resting entry's new size, 1 to 100. Its stop and target follow."
+          },
+          "stopPrice": {
+            "type": "number",
+            "description": "A stop-limit's new trigger, until a trade reaches it."
           },
           "test": {
             "type": "boolean",
-            "description": "Test orders can't be moved, so `true` is always refused."
+            "description": "Optional. The order decides: on a test order only a size change can be rehearsed."
+          }
+        }
+      },
+      "WalletModifyRequest": {
+        "type": "object",
+        "description": "Send at least one field. A limit takes `price` and `quantity`. An options stop takes `stopLoss`, `takeProfit`, `quantity`, or `price` when it has only one level.",
+        "properties": {
+          "price": {
+            "type": "number",
+            "description": "The new limit, or the new stop on a stock stop or a one-level options stop. In cents."
+          },
+          "quantity": {
+            "type": "integer",
+            "description": "The new size: up to 1,000 contracts or 100,000 shares."
+          },
+          "stopLoss": {
+            "type": "number",
+            "description": "Options stops: the new stock price the stop fires at."
+          },
+          "takeProfit": {
+            "type": "number",
+            "description": "Options stops: the new stock price the target fires at."
+          },
+          "test": {
+            "type": "boolean",
+            "description": "Test orders can't be modified, so `true` is always refused."
+          }
+        }
+      },
+      "WalletCancelRequest": {
+        "type": "object",
+        "description": "Send `cancelAll` or `ticker`, not both.",
+        "properties": {
+          "cancelAll": {
+            "type": "boolean",
+            "description": "`true` cancels every resting order on the wallet, options stops included."
+          },
+          "ticker": {
+            "type": "string",
+            "description": "Cancel only this underlying's orders, like `SPY`."
+          },
+          "test": {
+            "type": "boolean",
+            "description": "`true` cancels the wallet's test orders in your test log only."
+          }
+        }
+      },
+      "Wallet": {
+        "type": "object",
+        "description": "An options and stocks paper wallet. Money is in cents.",
+        "properties": {
+          "book": {
+            "type": "string",
+            "enum": [
+              "main",
+              "agent"
+            ]
+          },
+          "currency": {
+            "type": "string",
+            "example": "USD"
+          },
+          "asOf": {
+            "type": "string",
+            "format": "date-time"
+          },
+          "opened": {
+            "type": "boolean",
+            "description": "`false` until the first trade on this wallet."
+          },
+          "startingCashCents": {
+            "type": "integer",
+            "description": "What the wallet started with."
+          },
+          "cashCents": {
+            "type": "integer"
+          },
+          "buyingPowerCents": {
+            "type": "integer",
+            "description": "Cash minus what resting buys hold back, never below 0."
+          },
+          "reservedCents": {
+            "type": "integer",
+            "description": "Held back by resting opens until they fill, are cancelled or expire."
+          },
+          "realizedPnlCents": {
+            "type": "integer",
+            "description": "Profit or loss from closed trades."
+          },
+          "openPositions": {
+            "type": "integer"
+          },
+          "openCostBasisCents": {
+            "type": "integer",
+            "description": "What you paid for the open positions."
+          },
+          "openMarketValueCents": {
+            "type": "integer",
+            "description": "The open positions at their latest marks. Left out when one hasn't been marked yet."
+          },
+          "equityCents": {
+            "type": "integer",
+            "description": "Cash plus the open market value. Left out with it."
+          }
+        }
+      },
+      "WalletOrder": {
+        "type": "object",
+        "description": "A resting options or stock order: a limit, a stock stop, or an options stop-loss and target. It's not a `Trade`: when it fills, `tradeId` is the trade it went to.",
+        "properties": {
+          "id": {
+            "type": "string",
+            "format": "uuid"
+          },
+          "assetClass": {
+            "type": "string",
+            "enum": [
+              "options",
+              "stocks"
+            ]
+          },
+          "source": {
+            "type": "string",
+            "description": "`api` when a key placed it. Left out on an order placed on the Options Desk in Nexus."
+          },
+          "book": {
+            "type": "string",
+            "enum": [
+              "main",
+              "agent"
+            ]
+          },
+          "clientOrderId": {
+            "type": "string"
+          },
+          "ticker": {
+            "type": "string"
+          },
+          "strike": {
+            "type": "number",
+            "description": "Options only."
+          },
+          "direction": {
+            "type": "string",
+            "description": "`call` or `put` on an option. `long` or `short` on a stock: the side of the position it opens or closes."
+          },
+          "expiration": {
+            "type": "string",
+            "format": "date",
+            "description": "Options only."
+          },
+          "side": {
+            "type": "string",
+            "enum": [
+              "buy",
+              "sell"
+            ]
+          },
+          "positionEffect": {
+            "type": "string",
+            "enum": [
+              "open",
+              "close"
+            ]
+          },
+          "quantity": {
+            "type": "integer"
+          },
+          "filledQuantity": {
+            "type": "integer"
+          },
+          "orderType": {
+            "type": "string",
+            "enum": [
+              "limit",
+              "stop",
+              "take_profit",
+              "bracket",
+              "trailing_stop",
+              "market"
+            ],
+            "description": "`stop`, `take_profit` and `bracket` on an option are options stops. A trailing stop set on the Options Desk shows as `trailing_stop` (with `triggerOn` `premium` when it trails the option's own bid), and a desk market order as `market`, on the main wallet's list."
+          },
+          "timeInForce": {
+            "type": "string",
+            "enum": [
+              "day",
+              "gtc"
+            ]
+          },
+          "status": {
+            "type": "string",
+            "enum": [
+              "working",
+              "filled",
+              "cancelled",
+              "rejected",
+              "expired"
+            ]
+          },
+          "statusReason": {
+            "type": "string",
+            "description": "Why, when there's a reason."
+          },
+          "limitPrice": {
+            "type": "number"
+          },
+          "stopPrice": {
+            "type": "number",
+            "description": "A stock stop's level."
+          },
+          "stopLoss": {
+            "type": "number",
+            "description": "An options stop: the stock price the stop fires at."
+          },
+          "takeProfit": {
+            "type": "number",
+            "description": "An options stop: the stock price the target fires at."
+          },
+          "triggerOn": {
+            "type": "string",
+            "enum": [
+              "underlying",
+              "premium"
+            ],
+            "description": "`underlying` on an options stop: its levels are the stock's price."
+          },
+          "underlying": {
+            "type": "string",
+            "description": "The stock an options stop watches."
+          },
+          "firedLeg": {
+            "type": "string",
+            "enum": [
+              "stop_loss",
+              "take_profit"
+            ],
+            "description": "Which leg of an options stop fired."
+          },
+          "triggeredAt": {
+            "type": "string",
+            "format": "date-time",
+            "description": "When a stop was set off. It can't be cancelled or changed after that."
+          },
+          "triggerPrice": {
+            "type": "number",
+            "description": "The trade (or for an options stop, the stock price) that set it off."
+          },
+          "fillOrderId": {
+            "type": "string",
+            "format": "uuid",
+            "description": "An options stop that fired: the sell it sent."
+          },
+          "fillPrice": {
+            "type": "number",
+            "description": "The average fill: the ask a buy paid, the bid a sell got, or a stock's trade price."
+          },
+          "tradeId": {
+            "type": "string",
+            "format": "uuid",
+            "description": "The trade the fill went to, or the trade an options stop protects."
+          },
+          "reservedCents": {
+            "type": "integer",
+            "description": "Buying power a resting open holds back. 0 once it stops resting, and on a close."
+          },
+          "placedAt": {
+            "type": "string",
+            "format": "date-time"
+          },
+          "filledAt": {
+            "type": "string",
+            "format": "date-time"
+          },
+          "expiresAt": {
+            "type": "string",
+            "format": "date-time"
+          },
+          "test": {
+            "type": "boolean",
+            "description": "`true` on a test order. It never fills."
+          }
+        }
+      },
+      "WalletCancelled": {
+        "type": "object",
+        "properties": {
+          "book": {
+            "type": "string",
+            "enum": [
+              "main",
+              "agent"
+            ]
+          },
+          "cancelled": {
+            "type": "array",
+            "items": {
+              "$ref": "#/components/schemas/WalletOrder"
+            }
+          }
+        }
+      },
+      "FuturesTrade": {
+        "type": "object",
+        "description": "A futures row of `GET /api/nexus/v1/trades?assetClass=futures`: an open position or a closed trade, flat to flat. `status` tells them apart. Prices in index points, money in cents.",
+        "properties": {
+          "assetClass": {
+            "type": "string",
+            "enum": [
+              "futures"
+            ]
+          },
+          "status": {
+            "type": "string",
+            "enum": [
+              "open",
+              "closed"
+            ]
+          },
+          "account": {
+            "$ref": "#/components/schemas/FuturesAccountRef"
+          },
+          "symbol": {
+            "type": "string"
+          },
+          "side": {
+            "type": "string",
+            "enum": [
+              "long",
+              "short"
+            ]
+          },
+          "quantity": {
+            "type": "integer",
+            "description": "Open: contracts held. Closed: the most it held."
+          },
+          "avgPrice": {
+            "type": "number",
+            "description": "Open only."
+          },
+          "breakevenPrice": {
+            "type": "number",
+            "description": "Open only. Includes the round-trip commission."
+          },
+          "markPrice": {
+            "type": "number",
+            "description": "Open only."
+          },
+          "openPnlCents": {
+            "type": "integer",
+            "description": "Open only."
+          },
+          "pointValueCents": {
+            "type": "integer"
+          },
+          "tickSize": {
+            "type": "number"
+          },
+          "contracts": {
+            "type": "integer",
+            "description": "Closed only: contracts traded."
+          },
+          "openedAt": {
+            "type": "string",
+            "format": "date-time"
+          },
+          "closedAt": {
+            "type": "string",
+            "format": "date-time"
+          },
+          "tradingDay": {
+            "type": "string",
+            "format": "date"
+          },
+          "grossCents": {
+            "type": "integer"
+          },
+          "feesCents": {
+            "type": "integer"
+          },
+          "netCents": {
+            "type": "integer"
+          },
+          "scaleIns": {
+            "type": "integer"
+          },
+          "bestPoints": {
+            "type": "number",
+            "description": "Closed only: the best it got, in points."
+          },
+          "worstPoints": {
+            "type": "number",
+            "description": "Closed only: the worst it got, in points."
+          },
+          "tripId": {
+            "type": "string",
+            "format": "uuid",
+            "description": "The trade's id, flat to flat. An open position carries the one it'll close as."
           }
         }
       },
@@ -2576,6 +4419,47 @@
               "type": "string"
             },
             "description": "A repeated `closeAll`: positions still open."
+          },
+          "tradeId": {
+            "type": "string",
+            "format": "uuid",
+            "description": "A resting exit or an options stop: the trade it closes or protects."
+          },
+          "triggerOn": {
+            "type": "string",
+            "description": "An options stop: `underlying`."
+          },
+          "underlyingPrice": {
+            "type": "number",
+            "description": "An options stop: the stock's price right now."
+          },
+          "marketOpen": {
+            "type": "boolean",
+            "description": "An options stop: whether the market's open for the contract."
+          },
+          "firesNow": {
+            "type": "boolean",
+            "description": "An options stop: the stock's already through a level, so it fires on the next check. `firesOn` says which leg."
+          },
+          "wouldFireNow": {
+            "type": "boolean",
+            "description": "A test options stop: what `firesNow` would say."
+          },
+          "wouldFillNow": {
+            "type": "boolean",
+            "description": "A test limit: whether the real one would've filled right away, with `fillPrice`."
+          },
+          "wouldTriggerNow": {
+            "type": "boolean",
+            "description": "A test stock stop: the last trade's already through it."
+          },
+          "wouldRestBecause": {
+            "type": "string",
+            "description": "A test limit: why the real one would rest."
+          },
+          "alreadyCancelled": {
+            "type": "boolean",
+            "description": "A repeated cancel: it was already cancelled."
           }
         }
       },
@@ -2721,6 +4605,7 @@
             "type": "string",
             "enum": [
               "practice",
+              "agent",
               "evaluation",
               "funded"
             ]
@@ -2779,7 +4664,8 @@
             "enum": [
               "market",
               "limit",
-              "stop"
+              "stop",
+              "stop_limit"
             ]
           },
           "status": {
@@ -2817,6 +4703,11 @@
           "filledAt": {
             "type": "string",
             "format": "date-time"
+          },
+          "triggeredAt": {
+            "type": "string",
+            "format": "date-time",
+            "description": "A stop-limit: when a trade hit its stop. From then on it works as a limit."
           },
           "parentId": {
             "type": "string",
@@ -2861,6 +4752,7 @@
             "type": "string",
             "enum": [
               "practice",
+              "agent",
               "evaluation",
               "funded"
             ]
@@ -2899,7 +4791,7 @@
             "items": {
               "type": "string"
             },
-            "description": "`read` always. When tradable also `open`, `reduce`, `close`, `limit`, `stop`, `bracket`, `cancel`, `modify`."
+            "description": "`read` always. When tradable also `open`, `reduce`, `close`, `limit`, `stop`, `stop_limit`, `bracket`, `cancel`, `modify`."
           }
         }
       },
@@ -3017,11 +4909,31 @@
           },
           "futures": {
             "type": "object",
-            "description": "Only when your account has futures: `marketOpen`, `reopensAt` while closed, `maxOrderQuantity`, `orderTypes`, `bracket`, `modify`, the `contracts` you can trade (with the front month, tick size and value, commission, and whether there's a live price) and your `accounts` (each a `FuturesAccount`)."
+            "description": "Only when your account has futures: `marketOpen`, `reopensAt` while closed, `maxOrderQuantity`, `orderTypes`, `bracket`, `modify` (`price`, `quantity`, `stopPrice`), the `contracts` you can trade (with the front month, tick size and value, commission, and whether there's a live price), your `accounts` (each a `FuturesAccount`) and `list`, the futures trades list route."
           },
           "limits": {
             "type": "object",
             "description": "Your per-key `writesPerMinute` and `readsPerMinute`."
+          },
+          "agentAccount": {
+            "type": "object",
+            "description": "Your bot's agent account: the `account` value to send (`agent`), its `assetClasses`, `public` (always `false`), a `description`, and the `reads` that show it."
+          },
+          "wallets": {
+            "type": "object",
+            "description": "The wallet read (`read`) and its `books` (`main`, `agent`)."
+          },
+          "optionsOrders": {
+            "type": "object",
+            "description": "When options resting orders are on: `orderTypes`, `timeInForce`, `open`, `exit`, `modify`, the order routes (`orders`), `maxWorkingOrders`, and `stops` when options stops are on (`triggerOn`, `exit`, `fields`, `fill`, `onEntry`, `modify`, `expires`)."
+          },
+          "stocksOrders": {
+            "type": "object",
+            "description": "When stock resting orders are on: `orderTypes`, `timeInForce`, `gtcDays`, `open`, `exit`, `shorts`, `priceSource` (`lastTrade`), `fill`, `maxQuoteAgeSeconds`, `modify`, `orders` and `maxWorkingOrders`."
+          },
+          "adds": {
+            "type": "object",
+            "description": "Adding to a position: the `route`, `assetClasses`, `orderTypes`, `maxPosition` per asset class, how the `price` is set, and whether `test` adds work."
           }
         }
       }

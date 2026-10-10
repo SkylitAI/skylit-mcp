@@ -139,6 +139,7 @@ https://mcp.skylit.ai/mcp?toolset=trading
 | Tool | What it does |
 | --- | --- |
 | `nexus_capabilities` | What your key can trade right now. Call it first |
+| `nexus_wallet` | Your paper wallet's cash and buying power, or your bot's (`agent`) |
 | `nexus_trades`, `nexus_trade` | Read your options and stock trades |
 | `nexus_open_trade` | Open a paper trade: options, stocks, or futures (market, limit, stop and brackets) |
 | `nexus_exit_trade` | Trim or close an options or stock trade |
@@ -146,6 +147,13 @@ https://mcp.skylit.ai/mcp?toolset=trading
 | `nexus_futures_close` | Close one futures position or flatten the account |
 | `nexus_futures_working_orders`, `nexus_futures_order` | What's resting, or one order |
 | `nexus_futures_cancel_order`, `nexus_futures_cancel_orders`, `nexus_futures_modify_order` | Cancel one or all resting orders, or move one's price |
+| `nexus_add_to_trade` | Add to an open options or stock trade (coming soon) |
+| `nexus_working_orders`, `nexus_order`, `nexus_modify_order`, `nexus_cancel_order`, `nexus_cancel_orders` | Options limits, stock limits and stops, and options stop-losses resting on your wallet (coming soon) |
+
+Add `"account": "agent"` to any order to trade your bot's own practice account,
+which never counts anywhere public. Options and stock limits and stops, options
+stop-losses on the stock's price, futures stop-limit and size changes, and adds
+are coming soon: `nexus_capabilities` lists them once your key has them.
 
 Built so an AI can't fat-finger your account:
 
