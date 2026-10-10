@@ -101,7 +101,7 @@ test("trading refusals throw SkylitError; trades host configurable", async () =>
     new Skylit({ apiKey: "k", fetch }).openTrade({ contract: "SPY 600C 10/16 @ 9.99", quantity: 1, clientOrderId: "a2", test: true }),
     (e) => e instanceof SkylitError && e.status === 422 && e.code === "price_outside_market");
   const f = fake();
-  await new Skylit({ apiKey: "k", fetch: f.fetch, tradesUrl: "http://localhost:9/" }).tradingCapabilities();
+  await new Skylit({ apiKey: "k", fetch: f.fetch, tradesUrl: "http://localhost:9///" }).tradingCapabilities();
   assert.equal(f.seen.url, "http://localhost:9/api/nexus/v1/trading/capabilities");
 });
 

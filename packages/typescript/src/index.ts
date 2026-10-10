@@ -58,6 +58,12 @@ export class SkylitError extends Error {
 
 const joinSymbols = (s: Symbols): string => (typeof s === "string" ? s : s.join(","));
 const seg = (s: string): string => encodeURIComponent(s);
+/** Drops trailing slashes (a loop, not a regex, so a long run of slashes stays fast). */
+function trimSlashes(s: string): string {
+  let end = s.length;
+  while (end > 0 && s[end - 1] === "/") end--;
+  return s.slice(0, end);
+}
 
 export class Skylit {
   readonly baseUrl: string;
@@ -75,8 +81,8 @@ export class Skylit {
       );
     }
     this.#key = key;
-    this.baseUrl = (options.baseUrl ?? API_URL).replace(/\/+$/, "");
-    this.tradesUrl = (options.tradesUrl ?? TRADES_URL).replace(/\/+$/, "");
+    this.baseUrl = trimSlashes(options.baseUrl ?? API_URL);
+    this.tradesUrl = trimSlashes(options.tradesUrl ?? TRADES_URL);
     this.timeoutMs = options.timeoutMs ?? 30_000;
     this.#fetch = options.fetch ?? globalThis.fetch.bind(globalThis);
   }
