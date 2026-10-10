@@ -4,6 +4,8 @@
 
 > **Beta.** The API and MCP server are open to members with API access. Check yours on the [Developer page](https://app.skylit.ai/developer).
 
+> **Coming soon:** tools for placing paper trades in your Nexus accounts. Until then, use the [Nexus Trades API](https://www.skylit.ai/docs/nexus-trades/overview) from your own code.
+
 The server exposes the tools below. Each call costs the same credits as the
 equivalent REST endpoint; the cost is shown per tool below and your remaining
 balance is returned in each result's `meta`.
