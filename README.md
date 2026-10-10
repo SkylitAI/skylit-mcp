@@ -155,6 +155,8 @@ which never counts anywhere public. Options and stock limits and stops, options
 stop-losses on the stock's price, futures stop-limit and size changes, and adds
 are coming soon: `nexus_capabilities` lists them once your key has them.
 
+The Trades API's live stream of your own fills, orders and accounts (Server-Sent Events, coming soon) isn't an MCP tool, since MCP calls are request and response: open it from your own bot with the same key, as the Nexus Trades API docs show.
+
 Built so an AI can't fat-finger your account:
 
 - **Test first.** `test: true` checks and prices an order like a real one, then
