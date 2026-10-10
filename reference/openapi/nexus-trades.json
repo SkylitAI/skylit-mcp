@@ -1,0 +1,3030 @@
+{
+  "openapi": "3.1.0",
+  "info": {
+    "title": "Nexus Trades API",
+    "version": "1.0.0",
+    "summary": "Open, trim, close and read your Nexus paper trades from your own bot or script, with your Skylit API key.",
+    "description": "## What it is\n\nThe Nexus Trades API lets your own bot open, trim, close and read your Nexus trades with your Skylit API key. Options and stock orders go to your Nexus paper wallet. Futures orders go to your practice account, or to an evaluation or funded account you name. Every order goes through the same checks, the same live prices and the same account rules as an order you place by hand in Nexus.\n\n- **It never sends trades to a broker.** Nothing here reaches a real market, even if you've connected a broker to Nexus. The idea is that your bot already traded wherever it trades, and it mirrors that trade into Nexus.\n- **It isn't a way to pick your own fill.** The server prices every fill from the live market when your request arrives. You can't send a time.\n- **It isn't a market data feed.** It tells you what you can trade and what you hold. It doesn't stream quotes.\n- **Test orders** (`\"test\": true`) are checked and priced like real ones, then kept in a test log instead of being placed. Use them to rehearse your bot before it trades for real.\n\nAll tickers, prices, ids and times in the examples below are made up to show the shape of a call. They aren't real fills and they aren't results.\n\n## What you need\n\nA Skylit API key (make one under API keys) and a Skylit account that includes Nexus. Futures also need futures paper trading on your account. Call `GET /api/nexus/v1/trading/capabilities` first: it tells your bot what this key can trade right now, so it never has to guess.\n\n## Auth\n\nSend your key on every call as `Authorization: Bearer YOUR_SKYLIT_API_KEY`. An `X-API-Key` header works too, and if you send both, `Authorization` wins. A key only ever sees and trades its owner's trades and accounts. An id that belongs to someone else answers `404`, the same as an id that doesn't exist. A key you revoke stops working here within about a minute.\n\n## Requests and responses\n\n- Send JSON, one object per request, 8 KB at most.\n- Unknown fields are refused. A typo like `quantitty` gets `400 bad_request` naming the field. It's never silently ignored.\n- Success answers `{\"data\": ..., \"meta\": ...}`. `meta` is left out when there's nothing to add.\n- A failure answers `{\"error\": {\"code\": \"...\", \"message\": \"...\"}}`. Branch on `code`. The `message` is written for a person and can change.\n- Responses are never cached (`Cache-Control: no-store`).\n\n## Rate limits\n\nEvery request counts, refused ones included, so hammering a refused call keeps you throttled.\n\n| Limit | Applies to | Amount |\n|---|---|---|\n| Writes per key | POSTs from one key | 30 per minute |\n| Reads per key | GETs from one key | 120 per minute |\n| Writes per member | POSTs across all your keys | 60 per minute |\n| Reads per member | GETs across all your keys | 240 per minute |\n| Burst | POSTs across all your keys | 5 in any 5 seconds |\n| Per network client | Every request, before the key is checked | 300 per minute |\n\nEach answer carries `X-RateLimit-Limit` and `X-RateLimit-Remaining` for your per-key limit (writes on a POST, reads on a GET). Over a limit you get `429 rate_limited` with a `Retry-After` header in seconds. Your key's general Skylit API limit applies too, with the same `429`.\n\nYou can hold at most **50 open options and stock positions opened through the API**. The 51st open answers `409 open_position_limit`. Futures positions don't count toward it.\n\n## Retries and clientOrderId\n\nIf your bot sends an order and never hears back, it can't tell whether the order filled. Send a `clientOrderId` you make up and retry with the same one: you get the first order back and nothing new is placed.\n\n- 1 to 64 letters, digits, or `_ . : -`, in the body as `clientOrderId` or in an `Idempotency-Key` header. If you send both they must match.\n- Remembered for 24 hours, per member across all your keys, in one id space for options, stocks and futures.\n- A repeat answers `200` with the original and `meta.idempotentReplay: true`. A repeat while the first copy is still running answers `409 request_in_progress` with `Retry-After: 1`. The same id on a different kind of request answers `409 client_order_id_used`.\n- Test orders have their own id space, so a bot can go from test mode to live without changing how it makes ids.\n- A futures close that finds nothing to close doesn't use up its id.\n- Got `500 internal_error` on an order you sent with a `clientOrderId`? Retry with the same id. It can't fill twice.\n\n## Time rules\n\nYou never send a time. The fill time is the server's clock when your request arrives.\n\n- **Stocks and most options** fill 09:30 to 16:00 ET. SPY, QQQ and IWM options that aren't expiring today run to 16:15. SPX, SPXW, XSP, RUT, RUTW, VIX and VIXW options that aren't expiring today run to 17:00. Early-close days end at 13:00 (13:15 for those SPY, QQQ and IWM options). Weekends and US market holidays are closed.\n- **Futures** trade Sunday 18:00 ET to Friday 17:00 ET, with a break from 17:00 to 18:00 ET each day. Exchange holidays aren't modelled: on one the session reads as open, there's no live price, and orders answer `503 no_live_price`.\n- Outside those hours an order answers `422 market_closed` and nothing fills. It isn't queued for the open.\n\n## Price rules\n\nThe server prices the fill, for every asset class.\n\n| Asset class | A buy or an open fills at | A sell or a close fills at |\n|---|---|---|\n| Options | the live ask | the live bid |\n| Stocks | the live price | the live price |\n| Futures | the last trade, one tick worse for you | the last trade, one tick worse for you |\n\nA fill needs a live price. When the quote is too old you get `503 stale_quote`, and with no live price `503 no_live_price`. Futures market orders that open or add need a trade printed in the last 15 seconds. All of these are safe to retry after a moment.\n\n**Your own price (options and stocks only).** If your bot filled somewhere else, send `price` and Nexus records it, but only inside a small window: `bid - tolerance <= price <= ask + tolerance`. For options the tolerance is the larger of 2 ticks or 1% of the mid. For stocks it's the larger of 0.02 or 0.1% of the price. Outside the window, `ifOutside: \"reject\"` (the default) answers `422 price_outside_market`, and `ifOutside: \"market\"` fills at the server's price instead. `meta.fill.priceSource` says which one was used.\n\n**Futures take no fill price.** A market order fills at the price the server sees. A limit or stop order carries the price it rests at, and fills when the market trades through it, the same as an order from the Nexus futures ticket. An API order can never fill better than the same order placed by hand.\n\n## Not available yet\n\nStop-limit orders, limit or stop orders for options and stocks, changing a resting order's size (cancel it and place a new one), adding to an open options or stock position, selling options to open, trading a challenge entry, a push feed of fills, and creating or resetting accounts. Do those in Nexus.",
+    "contact": {
+      "name": "Skylit support",
+      "email": "support@skylit.ai"
+    }
+  },
+  "servers": [
+    {
+      "url": "https://app.skylit.ai",
+      "description": "Production"
+    }
+  ],
+  "security": [
+    {
+      "bearerApiKey": []
+    },
+    {
+      "apiKeyHeader": []
+    }
+  ],
+  "tags": [
+    {
+      "name": "Account and capabilities",
+      "description": "Start here. One call tells your bot which asset classes, order types, futures contracts and accounts this key can trade right now."
+    },
+    {
+      "name": "Options and stocks",
+      "description": "Open a trade, trim or close it, and read your trades. Options are bought to open and every order is a market order. The same open route takes futures too (see Futures)."
+    },
+    {
+      "name": "Futures",
+      "description": "Open a futures order with [`POST /api/nexus/v1/trades`](#post-api-nexus-v1-trades) and `\"assetClass\": \"futures\"`: pick the futures example there. It goes to your practice account unless `account` names an evaluation or funded account. Then close or flatten, and read the account and its order history here. Evaluation and funded accounts keep every rule they have in Nexus: the daily loss limit, the max loss, the contract cap."
+    },
+    {
+      "name": "Futures resting orders",
+      "description": "Limit orders, stop orders and brackets. Place them with the open route (`orderType`, `limitPrice`, `stopPrice`, `stopLoss`, `takeProfit`, `trailingStop`), then see what rests, read one, move its price, or cancel one or all. A resting order fills when the market trades through it, the same as on the Nexus futures ticket. Its price is where it rests, never where it fills."
+    },
+    {
+      "name": "Test orders",
+      "description": "Add `\"test\": true` to an open, an exit, a close or a cancel. The order is checked and priced like a real one against your real positions and the live market, then kept in your test log instead of being placed. It never moves a wallet or an account, and never shows up in stats, ranks, the feed or Discord.\n\n- `GET /api/nexus/v1/trades?test=true` lists your test log: your 10 newest test orders, newest first.\n- A test order's id works on the read, exit and cancel routes, and those act on the test log only. `\"test\": true` on a real order's id answers `404`, so a bot left in test mode can't touch a real order.\n- An options or stock test trade stays open in the log until you exit it, so your bot can rehearse open, trim and close. A futures test order is a standalone dry run: nothing ever fills a resting one, and it can't be moved.\n- On an evaluation or funded account a test order reads the loss rules as they were last judged instead of judging them again. `meta.notChecked` says so.\n- `clientOrderId` works on test orders too, in its own id space."
+    }
+  ],
+  "paths": {
+    "/api/nexus/v1/trading/capabilities": {
+      "get": {
+        "operationId": "getCapabilities",
+        "tags": [
+          "Account and capabilities"
+        ],
+        "summary": "What this key can trade right now",
+        "description": "The asset classes, order types, futures contracts and futures accounts this key can trade right now, plus your per-key limits. Call it when your bot starts, so it asks instead of guessing.\n\nOptions and stocks always list `market` as their only order type. The futures block is there only when your account has futures paper trading. When it doesn't, the futures entry under `assetClasses` says why. The first call creates your futures practice account if you don't have one yet, as Nexus does when you open the futures ticket.",
+        "responses": {
+          "200": {
+            "description": "What you can trade.",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "type": "object",
+                  "properties": {
+                    "data": {
+                      "$ref": "#/components/schemas/Capabilities"
+                    }
+                  }
+                },
+                "examples": {
+                  "default": {
+                    "summary": "A member with futures, the market open, a practice account and one evaluation.",
+                    "value": {
+                      "data": {
+                        "assetClasses": [
+                          {
+                            "assetClass": "options",
+                            "available": true,
+                            "orderTypes": [
+                              "market"
+                            ]
+                          },
+                          {
+                            "assetClass": "stocks",
+                            "available": true,
+                            "orderTypes": [
+                              "market"
+                            ]
+                          },
+                          {
+                            "assetClass": "futures",
+                            "available": true,
+                            "orderTypes": [
+                              "market",
+                              "limit",
+                              "stop"
+                            ]
+                          }
+                        ],
+                        "orderTypes": [
+                          "market"
+                        ],
+                        "testOrders": true,
+                        "futures": {
+                          "marketOpen": true,
+                          "maxOrderQuantity": 100,
+                          "orderTypes": [
+                            "market",
+                            "limit",
+                            "stop"
+                          ],
+                          "bracket": [
+                            "stopLoss",
+                            "takeProfit",
+                            "trailingStop"
+                          ],
+                          "modify": [
+                            "price"
+                          ],
+                          "contracts": [
+                            {
+                              "root": "NQ",
+                              "name": "E-mini Nasdaq-100",
+                              "symbol": "NQZ26",
+                              "tickSize": 0.25,
+                              "tickValueCents": 500,
+                              "pointValueCents": 2000,
+                              "commissionPerSideCents": 214,
+                              "livePrice": true
+                            },
+                            {
+                              "root": "MNQ",
+                              "name": "Micro E-mini Nasdaq-100",
+                              "symbol": "MNQZ26",
+                              "tickSize": 0.25,
+                              "tickValueCents": 50,
+                              "pointValueCents": 200,
+                              "commissionPerSideCents": 62,
+                              "livePrice": true
+                            }
+                          ],
+                          "accounts": [
+                            {
+                              "id": "3c2b1a90-5e4d-4f3a-8b2c-1d0e9f8a7b6c",
+                              "kind": "practice",
+                              "name": "Paper",
+                              "status": "active",
+                              "balanceCents": 5000000,
+                              "tradable": true,
+                              "allowed": [
+                                "read",
+                                "open",
+                                "reduce",
+                                "close",
+                                "limit",
+                                "stop",
+                                "bracket",
+                                "cancel",
+                                "modify"
+                              ]
+                            },
+                            {
+                              "id": "8d7c6b5a-4e3f-4a2b-9c1d-0e1f2a3b4c5d",
+                              "kind": "evaluation",
+                              "name": "50K Evaluation",
+                              "status": "active",
+                              "balanceCents": 5012500,
+                              "tradable": true,
+                              "allowed": [
+                                "read",
+                                "open",
+                                "reduce",
+                                "close",
+                                "limit",
+                                "stop",
+                                "bracket",
+                                "cancel",
+                                "modify"
+                              ]
+                            }
+                          ]
+                        },
+                        "limits": {
+                          "writesPerMinute": 30,
+                          "readsPerMinute": 120
+                        }
+                      }
+                    }
+                  }
+                }
+              }
+            }
+          },
+          "401": {
+            "$ref": "#/components/responses/Unauthorized"
+          },
+          "403": {
+            "$ref": "#/components/responses/Forbidden"
+          },
+          "429": {
+            "$ref": "#/components/responses/RateLimited"
+          },
+          "503": {
+            "$ref": "#/components/responses/Unavailable"
+          }
+        }
+      }
+    },
+    "/api/nexus/v1/trades": {
+      "post": {
+        "operationId": "openTrade",
+        "tags": [
+          "Options and stocks"
+        ],
+        "summary": "Open a trade (options, stocks or futures)",
+        "description": "One route for every asset class. `assetClass` picks the book.\n\n- **Options** are bought to open, at market. Send `contract` as shorthand (like `SPY 600C 10/16`), or `ticker`, `strike`, `direction` and `expiration`. Not both. 1 to 1,000 contracts.\n- **Stocks** take `ticker`, `side` (`buy` or `sell`) and `quantity`, 1 to 100,000 shares, at market.\n- **Futures** take `ticker` (a product like `NQ` for the front month, or one contract like `NQZ26`), `side`, `quantity` (1 to 100) and optionally `account`. A market order fills now. `orderType: \"limit\"` with `limitPrice`, or `\"stop\"` with `stopPrice`, rests until the market trades through it. Add `stopLoss`, `takeProfit` and `trailingStop` for a bracket on any order type: each leg is an order of its own, `held` while the entry rests and `working` once it fills. A resting order can wait on a quiet market. A market order needs a trade in the last 15 seconds to open or add.\n- **reduceOnly** stops a sell from opening a short when a stop already took you flat a second earlier. With `reduceOnly: true` the order goes through only if it shrinks what you hold, checked when it books. Otherwise it answers `422 reduce_only_would_open` and nothing is placed. It works on a market order with no bracket.\n- Futures go to your practice account unless `account` names another: `\"evaluation\"` or `\"funded\"` when you have exactly one running, or an account id from capabilities. Evaluation and funded accounts keep all their rules (daily loss, max loss, contract cap). Challenge entries can't be traded through the API.\n- Add `\"test\": true` to check and price the order without placing it. See Test orders in the intro.\n\nA new options or stock trade answers `201` with the trade. A futures order answers `201` with the order and its bracket. A repeated `clientOrderId` answers `200` with the first one.",
+        "requestBody": {
+          "required": true,
+          "content": {
+            "application/json": {
+              "schema": {
+                "$ref": "#/components/schemas/OpenTradeRequest"
+              },
+              "examples": {
+                "options": {
+                  "summary": "Options: 2 SPY 600 calls expiring 10/16, at market.",
+                  "value": {
+                    "ticker": "SPY",
+                    "direction": "call",
+                    "strike": 600,
+                    "expiration": "2026-10-16",
+                    "quantity": 2,
+                    "clientOrderId": "bot-0142"
+                  }
+                },
+                "options-shorthand": {
+                  "summary": "Options shorthand, with your own price. Fill at market if it's outside the window.",
+                  "value": {
+                    "contract": "SPY 600C 10/16",
+                    "quantity": 2,
+                    "price": 1.84,
+                    "ifOutside": "market"
+                  }
+                },
+                "stock": {
+                  "summary": "Stock: long 50 shares.",
+                  "value": {
+                    "assetClass": "stocks",
+                    "ticker": "AAPL",
+                    "side": "buy",
+                    "quantity": 50
+                  }
+                },
+                "futures": {
+                  "summary": "Futures: long 1 NQ in your practice account, at market.",
+                  "value": {
+                    "assetClass": "futures",
+                    "ticker": "NQ",
+                    "side": "buy",
+                    "quantity": 1,
+                    "clientOrderId": "bot-0143"
+                  }
+                },
+                "futures-bracket": {
+                  "summary": "Futures: buy 1 NQ at 25300 in the evaluation, with a stop at 25280 and a target at 25340.",
+                  "value": {
+                    "assetClass": "futures",
+                    "ticker": "NQ",
+                    "side": "buy",
+                    "quantity": 1,
+                    "account": "evaluation",
+                    "orderType": "limit",
+                    "limitPrice": 25300,
+                    "stopLoss": 25280,
+                    "takeProfit": 25340
+                  }
+                },
+                "futures-reduce": {
+                  "summary": "Futures reduceOnly: long 2 NQ in the evaluation, take 1 off and never open or flip.",
+                  "value": {
+                    "assetClass": "futures",
+                    "ticker": "NQ",
+                    "side": "sell",
+                    "quantity": 1,
+                    "account": "evaluation",
+                    "reduceOnly": true,
+                    "clientOrderId": "nq-trim-0001"
+                  }
+                },
+                "test": {
+                  "summary": "A test order: checked and priced, never placed.",
+                  "value": {
+                    "ticker": "SPY",
+                    "direction": "call",
+                    "strike": 600,
+                    "expiration": "2026-10-16",
+                    "quantity": 2,
+                    "test": true
+                  }
+                }
+              }
+            }
+          }
+        },
+        "parameters": [
+          {
+            "$ref": "#/components/parameters/IdempotencyKey"
+          }
+        ],
+        "responses": {
+          "200": {
+            "description": "A repeated `clientOrderId`: the first order, with `meta.idempotentReplay: true`. Nothing new was placed.",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "type": "object",
+                  "properties": {
+                    "data": {
+                      "$ref": "#/components/schemas/Trade"
+                    },
+                    "meta": {
+                      "$ref": "#/components/schemas/OrderMeta"
+                    }
+                  }
+                }
+              }
+            }
+          },
+          "201": {
+            "description": "Filled (or, for a futures limit or stop order, resting). Options and stocks answer a `Trade`, futures a `FuturesOrder`. A test order is the same shape with `\"test\": true`.",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "type": "object",
+                  "properties": {
+                    "data": {
+                      "$ref": "#/components/schemas/Trade"
+                    },
+                    "meta": {
+                      "$ref": "#/components/schemas/OrderMeta"
+                    }
+                  }
+                },
+                "examples": {
+                  "options": {
+                    "summary": "The options trade, filled at the live ask.",
+                    "value": {
+                      "data": {
+                        "id": "6f1c2a4e-8b1d-4c39-9a51-2d7e0b3c9f10",
+                        "userId": "0b8e5d2c-41a7-4f6e-9c3b-7a1d2e4f5a60",
+                        "ticker": "SPY",
+                        "strike": 600,
+                        "expiration": "2026-10-16",
+                        "direction": "call",
+                        "assetClass": "options",
+                        "tradeType": "simulated",
+                        "executionStatus": "simulated",
+                        "averageEntryPrice": 1.84,
+                        "totalQuantity": 2,
+                        "remainingQuantity": 2,
+                        "status": "active",
+                        "entryDate": "2026-10-09T14:32:05Z",
+                        "source": "api",
+                        "createdAt": "2026-10-09T14:32:05Z",
+                        "updatedAt": "2026-10-09T14:32:05Z"
+                      },
+                      "meta": {
+                        "fill": {
+                          "price": 1.84,
+                          "priceSource": "market"
+                        },
+                        "clientOrderId": "bot-0142"
+                      }
+                    }
+                  },
+                  "options-shorthand": {
+                    "summary": "Your price was inside the window, so it was taken. bid and ask are the quote it was checked against.",
+                    "value": {
+                      "data": {
+                        "id": "29d0e1f2-a3b4-4c5d-8e6f-809102132435",
+                        "userId": "0b8e5d2c-41a7-4f6e-9c3b-7a1d2e4f5a60",
+                        "ticker": "SPY",
+                        "strike": 600,
+                        "expiration": "2026-10-16",
+                        "direction": "call",
+                        "assetClass": "options",
+                        "tradeType": "simulated",
+                        "executionStatus": "simulated",
+                        "averageEntryPrice": 1.84,
+                        "totalQuantity": 2,
+                        "remainingQuantity": 2,
+                        "status": "active",
+                        "entryDate": "2026-10-09T14:32:05Z",
+                        "source": "api"
+                      },
+                      "meta": {
+                        "fill": {
+                          "price": 1.84,
+                          "priceSource": "client",
+                          "bid": 1.82,
+                          "ask": 1.86
+                        }
+                      }
+                    }
+                  },
+                  "stock": {
+                    "summary": "A stock buy is a long: direction call, strike 0, today's date.",
+                    "value": {
+                      "data": {
+                        "id": "3ae1f2a3-b4c5-4d6e-9f80-910213243546",
+                        "userId": "0b8e5d2c-41a7-4f6e-9c3b-7a1d2e4f5a60",
+                        "ticker": "AAPL",
+                        "strike": 0,
+                        "expiration": "2026-10-09",
+                        "direction": "call",
+                        "assetClass": "stocks",
+                        "tradeType": "simulated",
+                        "executionStatus": "simulated",
+                        "averageEntryPrice": 254.31,
+                        "totalQuantity": 50,
+                        "remainingQuantity": 50,
+                        "status": "active",
+                        "entryDate": "2026-10-09T14:33:40Z",
+                        "source": "api"
+                      },
+                      "meta": {
+                        "fill": {
+                          "price": 254.31,
+                          "priceSource": "market"
+                        }
+                      }
+                    }
+                  },
+                  "futures": {
+                    "summary": "The futures order, filled at the last trade plus one tick.",
+                    "value": {
+                      "data": {
+                        "id": "a1b2c3d4-e5f6-4a7b-8c9d-0e1f2a3b4c5d",
+                        "assetClass": "futures",
+                        "source": "api",
+                        "account": {
+                          "id": "3c2b1a90-5e4d-4f3a-8b2c-1d0e9f8a7b6c",
+                          "kind": "practice",
+                          "name": "Paper"
+                        },
+                        "symbol": "NQZ26",
+                        "side": "buy",
+                        "quantity": 1,
+                        "role": "entry",
+                        "orderType": "market",
+                        "status": "filled",
+                        "fillPrice": 25312.25,
+                        "placedAt": "2026-10-09T14:35:10Z",
+                        "filledAt": "2026-10-09T14:35:10Z"
+                      },
+                      "meta": {
+                        "fill": {
+                          "price": 25312.25,
+                          "priceSource": "market"
+                        },
+                        "clientOrderId": "bot-0143"
+                      }
+                    }
+                  },
+                  "futures-bracket": {
+                    "summary": "The limit order resting, with its stop and target held until it fills.",
+                    "value": {
+                      "data": {
+                        "id": "b2c3d4e5-f6a7-4b8c-9d0e-1f2a3b4c5d6e",
+                        "assetClass": "futures",
+                        "source": "api",
+                        "account": {
+                          "id": "8d7c6b5a-4e3f-4a2b-9c1d-0e1f2a3b4c5d",
+                          "kind": "evaluation",
+                          "name": "50K Evaluation"
+                        },
+                        "symbol": "NQZ26",
+                        "side": "buy",
+                        "quantity": 1,
+                        "role": "entry",
+                        "orderType": "limit",
+                        "status": "working",
+                        "limitPrice": 25300,
+                        "placedAt": "2026-10-09T14:36:00Z",
+                        "bracket": [
+                          {
+                            "id": "c3d4e5f6-a7b8-4c9d-8e0f-2a3b4c5d6e7f",
+                            "assetClass": "futures",
+                            "source": "api",
+                            "account": {
+                              "id": "8d7c6b5a-4e3f-4a2b-9c1d-0e1f2a3b4c5d",
+                              "kind": "evaluation",
+                              "name": "50K Evaluation"
+                            },
+                            "symbol": "NQZ26",
+                            "side": "sell",
+                            "quantity": 1,
+                            "role": "stop_loss",
+                            "orderType": "stop",
+                            "status": "held",
+                            "stopPrice": 25280,
+                            "placedAt": "2026-10-09T14:36:00Z",
+                            "parentId": "b2c3d4e5-f6a7-4b8c-9d0e-1f2a3b4c5d6e"
+                          },
+                          {
+                            "id": "d4e5f6a7-b8c9-4d0e-9f1a-3b4c5d6e7f80",
+                            "assetClass": "futures",
+                            "source": "api",
+                            "account": {
+                              "id": "8d7c6b5a-4e3f-4a2b-9c1d-0e1f2a3b4c5d",
+                              "kind": "evaluation",
+                              "name": "50K Evaluation"
+                            },
+                            "symbol": "NQZ26",
+                            "side": "sell",
+                            "quantity": 1,
+                            "role": "take_profit",
+                            "orderType": "limit",
+                            "status": "held",
+                            "limitPrice": 25340,
+                            "placedAt": "2026-10-09T14:36:00Z",
+                            "parentId": "b2c3d4e5-f6a7-4b8c-9d0e-1f2a3b4c5d6e"
+                          }
+                        ]
+                      }
+                    }
+                  },
+                  "futures-reduce": {
+                    "summary": "It only took 1 off the long. Had it been bigger than the position, or on the same side, it would have answered 422 reduce_only_would_open.",
+                    "value": {
+                      "data": {
+                        "id": "4bf2a3b4-c5d6-4e7f-8091-021324354657",
+                        "assetClass": "futures",
+                        "source": "api",
+                        "account": {
+                          "id": "8d7c6b5a-4e3f-4a2b-9c1d-0e1f2a3b4c5d",
+                          "kind": "evaluation",
+                          "name": "50K Evaluation"
+                        },
+                        "symbol": "NQZ26",
+                        "side": "sell",
+                        "quantity": 1,
+                        "role": "entry",
+                        "orderType": "market",
+                        "status": "filled",
+                        "fillPrice": 25318,
+                        "placedAt": "2026-10-09T14:52:31Z",
+                        "filledAt": "2026-10-09T14:52:31Z"
+                      },
+                      "meta": {
+                        "fill": {
+                          "price": 25318,
+                          "priceSource": "market"
+                        },
+                        "clientOrderId": "nq-trim-0001"
+                      }
+                    }
+                  },
+                  "test": {
+                    "summary": "A test trade. Nothing was placed: it lives in your test log.",
+                    "value": {
+                      "data": {
+                        "id": "e5f6a7b8-c9d0-4e1f-8a2b-4c5d6e7f8091",
+                        "userId": "0b8e5d2c-41a7-4f6e-9c3b-7a1d2e4f5a60",
+                        "ticker": "SPY",
+                        "strike": 600,
+                        "expiration": "2026-10-16",
+                        "direction": "call",
+                        "assetClass": "options",
+                        "averageEntryPrice": 1.84,
+                        "currentPrice": 1.84,
+                        "totalQuantity": 2,
+                        "remainingQuantity": 2,
+                        "status": "active",
+                        "entryDate": "2026-10-09T14:40:12Z",
+                        "test": true
+                      },
+                      "meta": {
+                        "test": true,
+                        "fill": {
+                          "price": 1.84,
+                          "priceSource": "market"
+                        }
+                      }
+                    }
+                  }
+                }
+              }
+            }
+          },
+          "400": {
+            "$ref": "#/components/responses/BadRequest"
+          },
+          "401": {
+            "$ref": "#/components/responses/Unauthorized"
+          },
+          "403": {
+            "$ref": "#/components/responses/Forbidden"
+          },
+          "404": {
+            "$ref": "#/components/responses/NotFound"
+          },
+          "409": {
+            "$ref": "#/components/responses/Conflict"
+          },
+          "422": {
+            "$ref": "#/components/responses/Unprocessable"
+          },
+          "429": {
+            "$ref": "#/components/responses/RateLimited"
+          },
+          "500": {
+            "$ref": "#/components/responses/InternalError"
+          },
+          "503": {
+            "$ref": "#/components/responses/Unavailable"
+          }
+        }
+      },
+      "get": {
+        "operationId": "listTrades",
+        "tags": [
+          "Options and stocks"
+        ],
+        "summary": "List your options and stock trades",
+        "description": "Your own options and stock trades, newest first. Futures aren't listed here: read them with the futures account and order history routes.\n\nWith `test=true` it lists your test log instead (your 10 newest test orders, futures ones included) and never a real trade.",
+        "parameters": [
+          {
+            "name": "status",
+            "in": "query",
+            "required": false,
+            "description": "Which trades to list.",
+            "schema": {
+              "type": "string",
+              "enum": [
+                "open",
+                "closed",
+                "all"
+              ],
+              "default": "all"
+            }
+          },
+          {
+            "name": "limit",
+            "in": "query",
+            "required": false,
+            "description": "Page size. Anything over 200 is read as 200.",
+            "schema": {
+              "type": "integer",
+              "default": 50,
+              "minimum": 1,
+              "maximum": 200
+            }
+          },
+          {
+            "name": "offset",
+            "in": "query",
+            "required": false,
+            "description": "How many trades to skip.",
+            "schema": {
+              "type": "integer",
+              "default": 0,
+              "minimum": 0,
+              "maximum": 100000
+            }
+          },
+          {
+            "name": "test",
+            "in": "query",
+            "required": false,
+            "description": "`true` lists your test log instead of your trades.",
+            "schema": {
+              "type": "string",
+              "enum": [
+                "true",
+                "false"
+              ],
+              "default": "false"
+            }
+          }
+        ],
+        "responses": {
+          "200": {
+            "description": "Your trades. `meta.total` counts every match, not just this page.",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "type": "object",
+                  "properties": {
+                    "data": {
+                      "type": "array",
+                      "items": {
+                        "$ref": "#/components/schemas/Trade"
+                      }
+                    },
+                    "meta": {
+                      "$ref": "#/components/schemas/ListMeta"
+                    }
+                  }
+                },
+                "examples": {
+                  "default": {
+                    "summary": "One open trade.",
+                    "value": {
+                      "data": [
+                        {
+                          "id": "6f1c2a4e-8b1d-4c39-9a51-2d7e0b3c9f10",
+                          "userId": "0b8e5d2c-41a7-4f6e-9c3b-7a1d2e4f5a60",
+                          "ticker": "SPY",
+                          "strike": 600,
+                          "expiration": "2026-10-16",
+                          "direction": "call",
+                          "assetClass": "options",
+                          "averageEntryPrice": 1.84,
+                          "currentPrice": 1.97,
+                          "totalQuantity": 2,
+                          "remainingQuantity": 2,
+                          "status": "active",
+                          "entryDate": "2026-10-09T14:32:05Z",
+                          "source": "api"
+                        }
+                      ],
+                      "meta": {
+                        "total": 1,
+                        "limit": 50,
+                        "offset": 0
+                      }
+                    }
+                  }
+                }
+              }
+            }
+          },
+          "400": {
+            "$ref": "#/components/responses/BadRequest"
+          },
+          "401": {
+            "$ref": "#/components/responses/Unauthorized"
+          },
+          "429": {
+            "$ref": "#/components/responses/RateLimited"
+          }
+        }
+      }
+    },
+    "/api/nexus/v1/trades/{id}/exits": {
+      "post": {
+        "operationId": "exitTrade",
+        "tags": [
+          "Options and stocks"
+        ],
+        "summary": "Trim or close an options or stock trade",
+        "description": "Sell part of a trade with `quantity`, or all of what's left with `\"closeAll\": true`. Not both. Fills at market (the live bid for options), or at your own `price` inside the window, as on an open.\n\nOn a test order's id this is a test exit, whatever the body says. Futures have no exits: close a futures position with the account close route.",
+        "parameters": [
+          {
+            "$ref": "#/components/parameters/TradeId"
+          },
+          {
+            "$ref": "#/components/parameters/IdempotencyKey"
+          }
+        ],
+        "requestBody": {
+          "required": true,
+          "content": {
+            "application/json": {
+              "schema": {
+                "$ref": "#/components/schemas/ExitRequest"
+              },
+              "examples": {
+                "trim": {
+                  "summary": "Trim 1 of 2.",
+                  "value": {
+                    "quantity": 1,
+                    "clientOrderId": "bot-0144"
+                  }
+                },
+                "close": {
+                  "summary": "Close the rest.",
+                  "value": {
+                    "closeAll": true
+                  }
+                }
+              }
+            }
+          }
+        },
+        "responses": {
+          "200": {
+            "description": "The trade with its new exit. `meta.fill.quantity` is how many this exit sold.",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "type": "object",
+                  "properties": {
+                    "data": {
+                      "$ref": "#/components/schemas/Trade"
+                    },
+                    "meta": {
+                      "$ref": "#/components/schemas/OrderMeta"
+                    }
+                  }
+                },
+                "examples": {
+                  "trim": {
+                    "summary": "Trimmed 1 at the live bid. One contract is still open.",
+                    "value": {
+                      "data": {
+                        "id": "6f1c2a4e-8b1d-4c39-9a51-2d7e0b3c9f10",
+                        "ticker": "SPY",
+                        "strike": 600,
+                        "expiration": "2026-10-16",
+                        "direction": "call",
+                        "assetClass": "options",
+                        "averageEntryPrice": 1.84,
+                        "totalQuantity": 2,
+                        "remainingQuantity": 1,
+                        "status": "active",
+                        "exits": [
+                          {
+                            "id": "f6a7b8c9-d0e1-4f2a-9b3c-5d6e7f809102",
+                            "price": 2.1,
+                            "quantity": 1,
+                            "date": "2026-10-09T15:05:41Z",
+                            "type": "partial",
+                            "orderType": "market"
+                          }
+                        ],
+                        "source": "api"
+                      },
+                      "meta": {
+                        "fill": {
+                          "price": 2.1,
+                          "priceSource": "market",
+                          "quantity": 1
+                        },
+                        "clientOrderId": "bot-0144"
+                      }
+                    }
+                  },
+                  "close": {
+                    "summary": "Closed the last contract at the live bid. The trade is closed.",
+                    "value": {
+                      "data": {
+                        "id": "6f1c2a4e-8b1d-4c39-9a51-2d7e0b3c9f10",
+                        "ticker": "SPY",
+                        "strike": 600,
+                        "expiration": "2026-10-16",
+                        "direction": "call",
+                        "assetClass": "options",
+                        "averageEntryPrice": 1.84,
+                        "totalQuantity": 2,
+                        "remainingQuantity": 0,
+                        "status": "closed",
+                        "exitDate": "2026-10-09T15:20:02Z",
+                        "exits": [
+                          {
+                            "id": "f6a7b8c9-d0e1-4f2a-9b3c-5d6e7f809102",
+                            "price": 2.1,
+                            "quantity": 1,
+                            "date": "2026-10-09T15:05:41Z",
+                            "type": "partial",
+                            "orderType": "market"
+                          },
+                          {
+                            "id": "07b8c9d0-e1f2-4a3b-8c4d-6e7f80910213",
+                            "price": 2.25,
+                            "quantity": 1,
+                            "date": "2026-10-09T15:20:02Z",
+                            "type": "full",
+                            "orderType": "market"
+                          }
+                        ],
+                        "source": "api"
+                      },
+                      "meta": {
+                        "fill": {
+                          "price": 2.25,
+                          "priceSource": "market",
+                          "quantity": 1
+                        }
+                      }
+                    }
+                  }
+                }
+              }
+            }
+          },
+          "400": {
+            "$ref": "#/components/responses/BadRequest"
+          },
+          "401": {
+            "$ref": "#/components/responses/Unauthorized"
+          },
+          "404": {
+            "$ref": "#/components/responses/NotFound"
+          },
+          "409": {
+            "$ref": "#/components/responses/Conflict"
+          },
+          "422": {
+            "$ref": "#/components/responses/Unprocessable"
+          },
+          "429": {
+            "$ref": "#/components/responses/RateLimited"
+          },
+          "503": {
+            "$ref": "#/components/responses/Unavailable"
+          }
+        }
+      }
+    },
+    "/api/nexus/v1/trades/{id}": {
+      "get": {
+        "operationId": "getTrade",
+        "tags": [
+          "Options and stocks"
+        ],
+        "summary": "Read one trade",
+        "description": "One of your options or stock trades, or one of your test orders (marked `\"test\": true`).",
+        "parameters": [
+          {
+            "$ref": "#/components/parameters/TradeId"
+          }
+        ],
+        "responses": {
+          "200": {
+            "description": "The trade.",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "type": "object",
+                  "properties": {
+                    "data": {
+                      "$ref": "#/components/schemas/Trade"
+                    }
+                  }
+                },
+                "examples": {
+                  "default": {
+                    "summary": "A closed trade.",
+                    "value": {
+                      "data": {
+                        "id": "6f1c2a4e-8b1d-4c39-9a51-2d7e0b3c9f10",
+                        "ticker": "SPY",
+                        "strike": 600,
+                        "expiration": "2026-10-16",
+                        "direction": "call",
+                        "assetClass": "options",
+                        "averageEntryPrice": 1.84,
+                        "totalQuantity": 2,
+                        "remainingQuantity": 0,
+                        "status": "closed",
+                        "entryDate": "2026-10-09T14:32:05Z",
+                        "exitDate": "2026-10-09T15:20:02Z",
+                        "exits": [
+                          {
+                            "id": "f6a7b8c9-d0e1-4f2a-9b3c-5d6e7f809102",
+                            "price": 2.1,
+                            "quantity": 1,
+                            "date": "2026-10-09T15:05:41Z",
+                            "type": "partial",
+                            "orderType": "market"
+                          },
+                          {
+                            "id": "07b8c9d0-e1f2-4a3b-8c4d-6e7f80910213",
+                            "price": 2.25,
+                            "quantity": 1,
+                            "date": "2026-10-09T15:20:02Z",
+                            "type": "full",
+                            "orderType": "market"
+                          }
+                        ],
+                        "source": "api"
+                      }
+                    }
+                  }
+                }
+              }
+            }
+          },
+          "401": {
+            "$ref": "#/components/responses/Unauthorized"
+          },
+          "404": {
+            "$ref": "#/components/responses/NotFound"
+          },
+          "429": {
+            "$ref": "#/components/responses/RateLimited"
+          }
+        }
+      }
+    },
+    "/api/nexus/v1/trading/accounts/{account}": {
+      "get": {
+        "operationId": "getFuturesAccount",
+        "tags": [
+          "Futures"
+        ],
+        "summary": "Read a futures account",
+        "description": "Balance, open and day P/L, positions, what rests on the account, and for an evaluation or funded account the rule meter (room to the daily loss limit and the max loss floor, the profit target, the contract cap). Every number is the one the Nexus account panel shows.\n\nOpen P/L, equity and day P/L are left out when a held contract has no live price. A number nobody measured isn't sent. Reads work on any of your accounts, challenge entries and ended accounts included.",
+        "parameters": [
+          {
+            "$ref": "#/components/parameters/Account"
+          }
+        ],
+        "responses": {
+          "200": {
+            "description": "The account.",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "type": "object",
+                  "properties": {
+                    "data": {
+                      "$ref": "#/components/schemas/FuturesAccountState"
+                    }
+                  }
+                },
+                "examples": {
+                  "default": {
+                    "summary": "An evaluation holding 1 NQ long.",
+                    "value": {
+                      "data": {
+                        "account": {
+                          "id": "8d7c6b5a-4e3f-4a2b-9c1d-0e1f2a3b4c5d",
+                          "kind": "evaluation",
+                          "name": "50K Evaluation",
+                          "status": "active",
+                          "balanceCents": 5012500,
+                          "tradable": true,
+                          "allowed": [
+                            "read",
+                            "open",
+                            "reduce",
+                            "close",
+                            "limit",
+                            "stop",
+                            "bracket",
+                            "cancel",
+                            "modify"
+                          ],
+                          "startingBalanceCents": 5000000,
+                          "dayStartBalanceCents": 5010000,
+                          "tradingDay": "2026-10-09",
+                          "openPnlCents": 15000,
+                          "equityCents": 5027500,
+                          "dayPnlCents": 17500
+                        },
+                        "positions": [
+                          {
+                            "symbol": "NQZ26",
+                            "side": "long",
+                            "quantity": 1,
+                            "avgPrice": 25312.25,
+                            "breakevenPrice": 25312.5,
+                            "markPrice": 25319.75,
+                            "openPnlCents": 15000,
+                            "pointValueCents": 2000,
+                            "tickSize": 0.25
+                          }
+                        ],
+                        "workingOrders": [],
+                        "rules": {
+                          "presetId": "eval-50k",
+                          "equityCents": 5027500,
+                          "profitTargetCents": 300000,
+                          "toTargetCents": 272500,
+                          "maxLossFloorCents": 4800000,
+                          "maxLossLimitCents": 200000,
+                          "toMaxLossCents": 227500,
+                          "dailyLossLimitCents": 100000,
+                          "dayPnlCents": 17500,
+                          "toDailyLimitCents": 117500,
+                          "maxContracts": 5,
+                          "openContracts": "1",
+                          "consistencyPct": 0,
+                          "minTradingDays": 0,
+                          "tradingDays": 3,
+                          "passBlockedBy": []
+                        }
+                      }
+                    }
+                  }
+                }
+              }
+            }
+          },
+          "400": {
+            "$ref": "#/components/responses/BadRequest"
+          },
+          "401": {
+            "$ref": "#/components/responses/Unauthorized"
+          },
+          "403": {
+            "$ref": "#/components/responses/Forbidden"
+          },
+          "404": {
+            "$ref": "#/components/responses/NotFound"
+          },
+          "422": {
+            "$ref": "#/components/responses/Unprocessable"
+          },
+          "429": {
+            "$ref": "#/components/responses/RateLimited"
+          },
+          "503": {
+            "$ref": "#/components/responses/Unavailable"
+          }
+        }
+      }
+    },
+    "/api/nexus/v1/trading/accounts/{account}/orders": {
+      "get": {
+        "operationId": "listFuturesOrders",
+        "tags": [
+          "Futures"
+        ],
+        "summary": "Futures order and fill history",
+        "description": "The orders your keys placed in this account, newest first, with the `clientOrderId` each was sent with, the key that placed it, and each fill's commission and gross realized P/L (0 on a fill that only opened). Page back with `before`: send the `placedAt` of the last order you have.",
+        "parameters": [
+          {
+            "$ref": "#/components/parameters/Account"
+          },
+          {
+            "name": "limit",
+            "in": "query",
+            "required": false,
+            "description": "Page size.",
+            "schema": {
+              "type": "integer",
+              "default": 50,
+              "minimum": 1,
+              "maximum": 200
+            }
+          },
+          {
+            "name": "before",
+            "in": "query",
+            "required": false,
+            "description": "Only orders placed before this time, like `2026-10-09T14:00:00Z`.",
+            "schema": {
+              "type": "string",
+              "format": "date-time"
+            }
+          }
+        ],
+        "responses": {
+          "200": {
+            "description": "The orders. `meta.count` is how many are on this page.",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "type": "object",
+                  "properties": {
+                    "data": {
+                      "type": "array",
+                      "items": {
+                        "$ref": "#/components/schemas/FuturesOrder"
+                      }
+                    },
+                    "meta": {
+                      "type": "object",
+                      "properties": {
+                        "count": {
+                          "type": "integer"
+                        },
+                        "limit": {
+                          "type": "integer"
+                        }
+                      }
+                    }
+                  }
+                },
+                "examples": {
+                  "default": {
+                    "summary": "One filled market order.",
+                    "value": {
+                      "data": [
+                        {
+                          "id": "a1b2c3d4-e5f6-4a7b-8c9d-0e1f2a3b4c5d",
+                          "assetClass": "futures",
+                          "source": "api",
+                          "account": {
+                            "id": "3c2b1a90-5e4d-4f3a-8b2c-1d0e9f8a7b6c",
+                            "kind": "practice",
+                            "name": "Paper"
+                          },
+                          "symbol": "NQZ26",
+                          "side": "buy",
+                          "quantity": 1,
+                          "role": "entry",
+                          "orderType": "market",
+                          "status": "filled",
+                          "fillPrice": 25312.25,
+                          "placedAt": "2026-10-09T14:35:10Z",
+                          "filledAt": "2026-10-09T14:35:10Z",
+                          "clientOrderId": "bot-0143",
+                          "keyId": "key_3f9a1c",
+                          "commissionCents": 214,
+                          "realizedPnlCents": 0
+                        }
+                      ],
+                      "meta": {
+                        "count": 1,
+                        "limit": 50
+                      }
+                    }
+                  }
+                }
+              }
+            }
+          },
+          "400": {
+            "$ref": "#/components/responses/BadRequest"
+          },
+          "401": {
+            "$ref": "#/components/responses/Unauthorized"
+          },
+          "403": {
+            "$ref": "#/components/responses/Forbidden"
+          },
+          "404": {
+            "$ref": "#/components/responses/NotFound"
+          },
+          "429": {
+            "$ref": "#/components/responses/RateLimited"
+          },
+          "503": {
+            "$ref": "#/components/responses/Unavailable"
+          }
+        }
+      }
+    },
+    "/api/nexus/v1/trading/accounts/{account}/close": {
+      "post": {
+        "operationId": "closeFuturesPositions",
+        "tags": [
+          "Futures"
+        ],
+        "summary": "Close a futures position, or flatten the account",
+        "description": "Send `ticker` to close one position at market, or `\"closeAll\": true` to flatten every position in the account. Not both. A close works on a quiet price, and it's the same close as the Flatten button in Nexus.\n\nNothing to close answers `200` with an empty `closed` list and `meta.nothingToClose: true`. If `closeAll` closes some positions and fails on one, the error says how many closed and which is still open. Send it again (with a new `clientOrderId` if you sent one). A repeated `closeAll` id returns what already closed, plus `meta.stillOpen` if anything is.",
+        "parameters": [
+          {
+            "$ref": "#/components/parameters/Account"
+          },
+          {
+            "$ref": "#/components/parameters/IdempotencyKey"
+          }
+        ],
+        "requestBody": {
+          "required": true,
+          "content": {
+            "application/json": {
+              "schema": {
+                "$ref": "#/components/schemas/CloseRequest"
+              },
+              "examples": {
+                "one": {
+                  "summary": "Close the NQ position.",
+                  "value": {
+                    "ticker": "NQ",
+                    "clientOrderId": "bot-0145"
+                  }
+                },
+                "all": {
+                  "summary": "Flatten the whole account, once. Repeating the id returns what the first one closed.",
+                  "value": {
+                    "closeAll": true,
+                    "clientOrderId": "flat-1555"
+                  }
+                }
+              }
+            }
+          }
+        },
+        "responses": {
+          "200": {
+            "description": "What closed.",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "type": "object",
+                  "properties": {
+                    "data": {
+                      "$ref": "#/components/schemas/FuturesClose"
+                    },
+                    "meta": {
+                      "$ref": "#/components/schemas/OrderMeta"
+                    }
+                  }
+                },
+                "examples": {
+                  "one": {
+                    "summary": "Closed 1 NQ long at the last trade less one tick.",
+                    "value": {
+                      "data": {
+                        "account": {
+                          "id": "3c2b1a90-5e4d-4f3a-8b2c-1d0e9f8a7b6c",
+                          "kind": "practice",
+                          "name": "Paper"
+                        },
+                        "closed": [
+                          {
+                            "id": "18c9d0e1-f2a3-4b4c-9d5e-7f8091021324",
+                            "assetClass": "futures",
+                            "source": "api",
+                            "account": {
+                              "id": "3c2b1a90-5e4d-4f3a-8b2c-1d0e9f8a7b6c",
+                              "kind": "practice",
+                              "name": "Paper"
+                            },
+                            "symbol": "NQZ26",
+                            "side": "sell",
+                            "quantity": 1,
+                            "role": "close",
+                            "orderType": "market",
+                            "status": "filled",
+                            "fillPrice": 25330.5,
+                            "placedAt": "2026-10-09T15:12:44Z",
+                            "filledAt": "2026-10-09T15:12:44Z"
+                          }
+                        ]
+                      },
+                      "meta": {
+                        "clientOrderId": "bot-0145"
+                      }
+                    }
+                  },
+                  "all": {
+                    "summary": "Flattened a long NQ and a short MNQ. With nothing open it answers an empty closed list and meta.nothingToClose, and the id isn't used up.",
+                    "value": {
+                      "data": {
+                        "account": {
+                          "id": "3c2b1a90-5e4d-4f3a-8b2c-1d0e9f8a7b6c",
+                          "kind": "practice",
+                          "name": "Paper"
+                        },
+                        "closed": [
+                          {
+                            "id": "5c03b4c5-d6e7-4f80-9102-132435465768",
+                            "assetClass": "futures",
+                            "source": "api",
+                            "account": {
+                              "id": "3c2b1a90-5e4d-4f3a-8b2c-1d0e9f8a7b6c",
+                              "kind": "practice",
+                              "name": "Paper"
+                            },
+                            "symbol": "MNQZ26",
+                            "side": "buy",
+                            "quantity": 2,
+                            "role": "close",
+                            "orderType": "market",
+                            "status": "filled",
+                            "fillPrice": 25329,
+                            "placedAt": "2026-10-09T15:55:02Z",
+                            "filledAt": "2026-10-09T15:55:02Z"
+                          },
+                          {
+                            "id": "6d14c5d6-e7f8-4091-8213-243546576879",
+                            "assetClass": "futures",
+                            "source": "api",
+                            "account": {
+                              "id": "3c2b1a90-5e4d-4f3a-8b2c-1d0e9f8a7b6c",
+                              "kind": "practice",
+                              "name": "Paper"
+                            },
+                            "symbol": "NQZ26",
+                            "side": "sell",
+                            "quantity": 1,
+                            "role": "close",
+                            "orderType": "market",
+                            "status": "filled",
+                            "fillPrice": 25328.25,
+                            "placedAt": "2026-10-09T15:55:02Z",
+                            "filledAt": "2026-10-09T15:55:02Z"
+                          }
+                        ]
+                      },
+                      "meta": {
+                        "clientOrderId": "flat-1555"
+                      }
+                    }
+                  }
+                }
+              }
+            }
+          },
+          "400": {
+            "$ref": "#/components/responses/BadRequest"
+          },
+          "401": {
+            "$ref": "#/components/responses/Unauthorized"
+          },
+          "403": {
+            "$ref": "#/components/responses/Forbidden"
+          },
+          "404": {
+            "$ref": "#/components/responses/NotFound"
+          },
+          "409": {
+            "$ref": "#/components/responses/Conflict"
+          },
+          "422": {
+            "$ref": "#/components/responses/Unprocessable"
+          },
+          "429": {
+            "$ref": "#/components/responses/RateLimited"
+          },
+          "500": {
+            "$ref": "#/components/responses/InternalError"
+          },
+          "503": {
+            "$ref": "#/components/responses/Unavailable"
+          }
+        }
+      }
+    },
+    "/api/nexus/v1/trading/accounts/{account}/orders/working": {
+      "get": {
+        "operationId": "listFuturesWorkingOrders",
+        "tags": [
+          "Futures resting orders"
+        ],
+        "summary": "What's resting on the account",
+        "description": "Every order resting on the account: limit and stop orders, and the stops and targets of brackets, whether a key placed them (`source: \"api\"`) or you placed them in Nexus (no `source`).",
+        "parameters": [
+          {
+            "$ref": "#/components/parameters/Account"
+          }
+        ],
+        "responses": {
+          "200": {
+            "description": "The resting orders. `meta.count` is how many.",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "type": "object",
+                  "properties": {
+                    "data": {
+                      "type": "array",
+                      "items": {
+                        "$ref": "#/components/schemas/FuturesOrder"
+                      }
+                    },
+                    "meta": {
+                      "type": "object",
+                      "properties": {
+                        "count": {
+                          "type": "integer"
+                        }
+                      }
+                    }
+                  }
+                },
+                "examples": {
+                  "default": {
+                    "summary": "One limit order resting.",
+                    "value": {
+                      "data": [
+                        {
+                          "id": "b2c3d4e5-f6a7-4b8c-9d0e-1f2a3b4c5d6e",
+                          "assetClass": "futures",
+                          "source": "api",
+                          "account": {
+                            "id": "8d7c6b5a-4e3f-4a2b-9c1d-0e1f2a3b4c5d",
+                            "kind": "evaluation",
+                            "name": "50K Evaluation"
+                          },
+                          "symbol": "NQZ26",
+                          "side": "buy",
+                          "quantity": 1,
+                          "role": "entry",
+                          "orderType": "limit",
+                          "status": "working",
+                          "limitPrice": 25300,
+                          "placedAt": "2026-10-09T14:36:00Z"
+                        }
+                      ],
+                      "meta": {
+                        "count": 1
+                      }
+                    }
+                  }
+                }
+              }
+            }
+          },
+          "401": {
+            "$ref": "#/components/responses/Unauthorized"
+          },
+          "403": {
+            "$ref": "#/components/responses/Forbidden"
+          },
+          "404": {
+            "$ref": "#/components/responses/NotFound"
+          },
+          "429": {
+            "$ref": "#/components/responses/RateLimited"
+          },
+          "503": {
+            "$ref": "#/components/responses/Unavailable"
+          }
+        }
+      }
+    },
+    "/api/nexus/v1/trading/accounts/{account}/orders/{orderId}": {
+      "get": {
+        "operationId": "getFuturesOrder",
+        "tags": [
+          "Futures resting orders"
+        ],
+        "summary": "Read one futures order",
+        "description": "One order as it stands now, with its bracket. An order is looked up in the named account only, so the right id on the wrong account answers `404 order_not_found`. A futures test order's id answers with the test order, marked `\"test\": true`.",
+        "parameters": [
+          {
+            "$ref": "#/components/parameters/Account"
+          },
+          {
+            "$ref": "#/components/parameters/OrderId"
+          }
+        ],
+        "responses": {
+          "200": {
+            "description": "The order.",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "type": "object",
+                  "properties": {
+                    "data": {
+                      "$ref": "#/components/schemas/FuturesOrder"
+                    }
+                  }
+                },
+                "examples": {
+                  "default": {
+                    "summary": "A filled limit entry, its stop and target now working.",
+                    "value": {
+                      "data": {
+                        "id": "b2c3d4e5-f6a7-4b8c-9d0e-1f2a3b4c5d6e",
+                        "assetClass": "futures",
+                        "source": "api",
+                        "account": {
+                          "id": "8d7c6b5a-4e3f-4a2b-9c1d-0e1f2a3b4c5d",
+                          "kind": "evaluation",
+                          "name": "50K Evaluation"
+                        },
+                        "symbol": "NQZ26",
+                        "side": "buy",
+                        "quantity": 1,
+                        "role": "entry",
+                        "orderType": "limit",
+                        "status": "filled",
+                        "limitPrice": 25300,
+                        "fillPrice": 25300,
+                        "placedAt": "2026-10-09T14:36:00Z",
+                        "filledAt": "2026-10-09T14:41:17Z",
+                        "keyId": "key_3f9a1c",
+                        "commissionCents": 214,
+                        "realizedPnlCents": 0,
+                        "bracket": [
+                          {
+                            "id": "c3d4e5f6-a7b8-4c9d-8e0f-2a3b4c5d6e7f",
+                            "assetClass": "futures",
+                            "source": "api",
+                            "account": {
+                              "id": "8d7c6b5a-4e3f-4a2b-9c1d-0e1f2a3b4c5d",
+                              "kind": "evaluation",
+                              "name": "50K Evaluation"
+                            },
+                            "symbol": "NQZ26",
+                            "side": "sell",
+                            "quantity": 1,
+                            "role": "stop_loss",
+                            "orderType": "stop",
+                            "status": "working",
+                            "stopPrice": 25280,
+                            "placedAt": "2026-10-09T14:36:00Z",
+                            "parentId": "b2c3d4e5-f6a7-4b8c-9d0e-1f2a3b4c5d6e"
+                          },
+                          {
+                            "id": "d4e5f6a7-b8c9-4d0e-9f1a-3b4c5d6e7f80",
+                            "assetClass": "futures",
+                            "source": "api",
+                            "account": {
+                              "id": "8d7c6b5a-4e3f-4a2b-9c1d-0e1f2a3b4c5d",
+                              "kind": "evaluation",
+                              "name": "50K Evaluation"
+                            },
+                            "symbol": "NQZ26",
+                            "side": "sell",
+                            "quantity": 1,
+                            "role": "take_profit",
+                            "orderType": "limit",
+                            "status": "working",
+                            "limitPrice": 25340,
+                            "placedAt": "2026-10-09T14:36:00Z",
+                            "parentId": "b2c3d4e5-f6a7-4b8c-9d0e-1f2a3b4c5d6e"
+                          }
+                        ]
+                      }
+                    }
+                  }
+                }
+              }
+            }
+          },
+          "401": {
+            "$ref": "#/components/responses/Unauthorized"
+          },
+          "403": {
+            "$ref": "#/components/responses/Forbidden"
+          },
+          "404": {
+            "$ref": "#/components/responses/NotFound"
+          },
+          "429": {
+            "$ref": "#/components/responses/RateLimited"
+          },
+          "503": {
+            "$ref": "#/components/responses/Unavailable"
+          }
+        }
+      }
+    },
+    "/api/nexus/v1/trading/accounts/{account}/orders/{orderId}/cancel": {
+      "post": {
+        "operationId": "cancelFuturesOrder",
+        "tags": [
+          "Futures resting orders"
+        ],
+        "summary": "Cancel one resting order",
+        "description": "Cancels a working or held order. Cancelling an entry takes its bracket with it. An order that already filled can't be cancelled (`409 order_not_working`). Cancelling one that's already cancelled answers `200` with `meta.alreadyCancelled: true`.\n\nThe body is optional. On a test order's id this cancels it in your test log only. `\"test\": true` on a real order's id answers `404`, so a bot left in test mode can't cancel a real order.",
+        "parameters": [
+          {
+            "$ref": "#/components/parameters/Account"
+          },
+          {
+            "$ref": "#/components/parameters/OrderId"
+          }
+        ],
+        "requestBody": {
+          "required": false,
+          "content": {
+            "application/json": {
+              "schema": {
+                "$ref": "#/components/schemas/TestFlag"
+              },
+              "examples": {
+                "default": {
+                  "summary": "No body needed for a real order.",
+                  "value": {}
+                }
+              }
+            }
+          }
+        },
+        "responses": {
+          "200": {
+            "description": "The cancelled order, with its bracket.",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "type": "object",
+                  "properties": {
+                    "data": {
+                      "$ref": "#/components/schemas/FuturesOrder"
+                    }
+                  }
+                },
+                "examples": {
+                  "default": {
+                    "summary": "A resting limit order, cancelled.",
+                    "value": {
+                      "data": {
+                        "id": "b2c3d4e5-f6a7-4b8c-9d0e-1f2a3b4c5d6e",
+                        "assetClass": "futures",
+                        "source": "api",
+                        "account": {
+                          "id": "8d7c6b5a-4e3f-4a2b-9c1d-0e1f2a3b4c5d",
+                          "kind": "evaluation",
+                          "name": "50K Evaluation"
+                        },
+                        "symbol": "NQZ26",
+                        "side": "buy",
+                        "quantity": 1,
+                        "role": "entry",
+                        "orderType": "limit",
+                        "status": "cancelled",
+                        "limitPrice": 25300,
+                        "placedAt": "2026-10-09T14:36:00Z"
+                      }
+                    }
+                  }
+                }
+              }
+            }
+          },
+          "400": {
+            "$ref": "#/components/responses/BadRequest"
+          },
+          "401": {
+            "$ref": "#/components/responses/Unauthorized"
+          },
+          "403": {
+            "$ref": "#/components/responses/Forbidden"
+          },
+          "404": {
+            "$ref": "#/components/responses/NotFound"
+          },
+          "409": {
+            "$ref": "#/components/responses/Conflict"
+          },
+          "422": {
+            "$ref": "#/components/responses/Unprocessable"
+          },
+          "429": {
+            "$ref": "#/components/responses/RateLimited"
+          },
+          "503": {
+            "$ref": "#/components/responses/Unavailable"
+          }
+        }
+      }
+    },
+    "/api/nexus/v1/trading/accounts/{account}/orders/{orderId}/modify": {
+      "post": {
+        "operationId": "modifyFuturesOrder",
+        "tags": [
+          "Futures resting orders"
+        ],
+        "summary": "Move a resting order's price",
+        "description": "Moves a working limit or stop order (or a bracket's stop or target) to a new `price`, like dragging it on the Nexus chart. Only the price can change. To change the size, cancel the order and place a new one.\n\nNo live price answers `503 no_live_price` and the order stays where it was. A test order can't be moved (`400 test_modify_unavailable`): cancel it and send a new test order at the new price.",
+        "parameters": [
+          {
+            "$ref": "#/components/parameters/Account"
+          },
+          {
+            "$ref": "#/components/parameters/OrderId"
+          }
+        ],
+        "requestBody": {
+          "required": true,
+          "content": {
+            "application/json": {
+              "schema": {
+                "$ref": "#/components/schemas/ModifyRequest"
+              },
+              "examples": {
+                "default": {
+                  "summary": "Move the limit to 25295.",
+                  "value": {
+                    "price": 25295
+                  }
+                }
+              }
+            }
+          }
+        },
+        "responses": {
+          "200": {
+            "description": "The order at its new price, with its bracket.",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "type": "object",
+                  "properties": {
+                    "data": {
+                      "$ref": "#/components/schemas/FuturesOrder"
+                    }
+                  }
+                },
+                "examples": {
+                  "default": {
+                    "summary": "The limit order, moved.",
+                    "value": {
+                      "data": {
+                        "id": "b2c3d4e5-f6a7-4b8c-9d0e-1f2a3b4c5d6e",
+                        "assetClass": "futures",
+                        "source": "api",
+                        "account": {
+                          "id": "8d7c6b5a-4e3f-4a2b-9c1d-0e1f2a3b4c5d",
+                          "kind": "evaluation",
+                          "name": "50K Evaluation"
+                        },
+                        "symbol": "NQZ26",
+                        "side": "buy",
+                        "quantity": 1,
+                        "role": "entry",
+                        "orderType": "limit",
+                        "status": "working",
+                        "limitPrice": 25295,
+                        "placedAt": "2026-10-09T14:36:00Z"
+                      }
+                    }
+                  }
+                }
+              }
+            }
+          },
+          "400": {
+            "$ref": "#/components/responses/BadRequest"
+          },
+          "401": {
+            "$ref": "#/components/responses/Unauthorized"
+          },
+          "403": {
+            "$ref": "#/components/responses/Forbidden"
+          },
+          "404": {
+            "$ref": "#/components/responses/NotFound"
+          },
+          "409": {
+            "$ref": "#/components/responses/Conflict"
+          },
+          "422": {
+            "$ref": "#/components/responses/Unprocessable"
+          },
+          "429": {
+            "$ref": "#/components/responses/RateLimited"
+          },
+          "503": {
+            "$ref": "#/components/responses/Unavailable"
+          }
+        }
+      }
+    },
+    "/api/nexus/v1/trading/accounts/{account}/orders/cancel": {
+      "post": {
+        "operationId": "cancelAllFuturesOrders",
+        "tags": [
+          "Futures resting orders"
+        ],
+        "summary": "Cancel everything resting, or one contract's orders",
+        "description": "`\"cancelAll\": true` cancels every resting order on the account. `ticker` cancels only that contract's. Not both. Nothing resting answers `200` with `meta.nothingToCancel: true`.\n\nIf one cancel fails part way, the error says how many were cancelled and which order is still working. Read the working list and send the cancel again. With `\"test\": true` it cancels the account's test orders in your test log and never touches a real order.",
+        "parameters": [
+          {
+            "$ref": "#/components/parameters/Account"
+          }
+        ],
+        "requestBody": {
+          "required": true,
+          "content": {
+            "application/json": {
+              "schema": {
+                "$ref": "#/components/schemas/CancelRequest"
+              },
+              "examples": {
+                "all": {
+                  "summary": "Cancel everything resting.",
+                  "value": {
+                    "cancelAll": true
+                  }
+                },
+                "one": {
+                  "summary": "Cancel only the NQ orders.",
+                  "value": {
+                    "ticker": "NQ"
+                  }
+                }
+              }
+            }
+          }
+        },
+        "responses": {
+          "200": {
+            "description": "What was cancelled. `meta.count` is how many.",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "type": "object",
+                  "properties": {
+                    "data": {
+                      "$ref": "#/components/schemas/FuturesCancelled"
+                    },
+                    "meta": {
+                      "type": "object",
+                      "properties": {
+                        "count": {
+                          "type": "integer"
+                        },
+                        "nothingToCancel": {
+                          "type": "boolean"
+                        }
+                      }
+                    }
+                  }
+                },
+                "examples": {
+                  "all": {
+                    "summary": "One limit order cancelled.",
+                    "value": {
+                      "data": {
+                        "account": {
+                          "id": "8d7c6b5a-4e3f-4a2b-9c1d-0e1f2a3b4c5d",
+                          "kind": "evaluation",
+                          "name": "50K Evaluation"
+                        },
+                        "cancelled": [
+                          {
+                            "id": "b2c3d4e5-f6a7-4b8c-9d0e-1f2a3b4c5d6e",
+                            "assetClass": "futures",
+                            "source": "api",
+                            "account": {
+                              "id": "8d7c6b5a-4e3f-4a2b-9c1d-0e1f2a3b4c5d",
+                              "kind": "evaluation",
+                              "name": "50K Evaluation"
+                            },
+                            "symbol": "NQZ26",
+                            "side": "buy",
+                            "quantity": 1,
+                            "role": "entry",
+                            "orderType": "limit",
+                            "status": "cancelled",
+                            "limitPrice": 25300,
+                            "placedAt": "2026-10-09T14:36:00Z"
+                          }
+                        ]
+                      },
+                      "meta": {
+                        "count": 1
+                      }
+                    }
+                  },
+                  "one": {
+                    "summary": "Only the NQ orders: an entry and its held stop go together, so one cancel took both.",
+                    "value": {
+                      "data": {
+                        "account": {
+                          "id": "8d7c6b5a-4e3f-4a2b-9c1d-0e1f2a3b4c5d",
+                          "kind": "evaluation",
+                          "name": "50K Evaluation"
+                        },
+                        "cancelled": [
+                          {
+                            "id": "7e25d6e7-f809-4102-9324-354657687980",
+                            "assetClass": "futures",
+                            "source": "api",
+                            "account": {
+                              "id": "8d7c6b5a-4e3f-4a2b-9c1d-0e1f2a3b4c5d",
+                              "kind": "evaluation",
+                              "name": "50K Evaluation"
+                            },
+                            "symbol": "NQZ26",
+                            "side": "sell",
+                            "quantity": 1,
+                            "role": "entry",
+                            "orderType": "stop",
+                            "status": "cancelled",
+                            "stopPrice": 25250,
+                            "placedAt": "2026-10-09T15:01:12Z",
+                            "bracket": [
+                              {
+                                "id": "8f36e7f8-0910-4213-8435-465768798091",
+                                "assetClass": "futures",
+                                "source": "api",
+                                "account": {
+                                  "id": "8d7c6b5a-4e3f-4a2b-9c1d-0e1f2a3b4c5d",
+                                  "kind": "evaluation",
+                                  "name": "50K Evaluation"
+                                },
+                                "symbol": "NQZ26",
+                                "side": "buy",
+                                "quantity": 1,
+                                "role": "stop_loss",
+                                "orderType": "stop",
+                                "status": "cancelled",
+                                "stopPrice": 25270,
+                                "placedAt": "2026-10-09T15:01:12Z",
+                                "parentId": "7e25d6e7-f809-4102-9324-354657687980"
+                              }
+                            ]
+                          }
+                        ]
+                      },
+                      "meta": {
+                        "count": 1
+                      }
+                    }
+                  }
+                }
+              }
+            }
+          },
+          "400": {
+            "$ref": "#/components/responses/BadRequest"
+          },
+          "401": {
+            "$ref": "#/components/responses/Unauthorized"
+          },
+          "403": {
+            "$ref": "#/components/responses/Forbidden"
+          },
+          "404": {
+            "$ref": "#/components/responses/NotFound"
+          },
+          "409": {
+            "$ref": "#/components/responses/Conflict"
+          },
+          "422": {
+            "$ref": "#/components/responses/Unprocessable"
+          },
+          "429": {
+            "$ref": "#/components/responses/RateLimited"
+          },
+          "503": {
+            "$ref": "#/components/responses/Unavailable"
+          }
+        }
+      }
+    }
+  },
+  "components": {
+    "securitySchemes": {
+      "bearerApiKey": {
+        "type": "http",
+        "scheme": "bearer",
+        "description": "Your Skylit API key: `Authorization: Bearer YOUR_SKYLIT_API_KEY`."
+      },
+      "apiKeyHeader": {
+        "type": "apiKey",
+        "in": "header",
+        "name": "X-API-Key",
+        "description": "The same key in an `X-API-Key` header. If you send both, `Authorization` wins."
+      }
+    },
+    "parameters": {
+      "TradeId": {
+        "name": "id",
+        "in": "path",
+        "required": true,
+        "description": "The trade's id, from the open or the list.",
+        "schema": {
+          "type": "string",
+          "format": "uuid",
+          "example": "6f1c2a4e-8b1d-4c39-9a51-2d7e0b3c9f10"
+        }
+      },
+      "Account": {
+        "name": "account",
+        "in": "path",
+        "required": true,
+        "description": "`practice`, `evaluation` or `funded` (when you have exactly one running), or a futures account id from capabilities.",
+        "schema": {
+          "type": "string",
+          "example": "practice"
+        }
+      },
+      "OrderId": {
+        "name": "orderId",
+        "in": "path",
+        "required": true,
+        "description": "The order's id, from the open, the working list or the history.",
+        "schema": {
+          "type": "string",
+          "format": "uuid",
+          "example": "b2c3d4e5-f6a7-4b8c-9d0e-1f2a3b4c5d6e"
+        }
+      },
+      "IdempotencyKey": {
+        "name": "Idempotency-Key",
+        "in": "header",
+        "required": false,
+        "description": "Your `clientOrderId`, as a header instead of a body field. If you send both they must match.",
+        "schema": {
+          "type": "string"
+        }
+      }
+    },
+    "responses": {
+      "BadRequest": {
+        "description": "The request was refused before anything was traded. Codes: `bad_request`, `bad_contract`, `invalid_quantity`, `invalid_price`, `unsupported_asset_class`, `unsupported_order_type`, `only_market_orders`, `test_orders_unavailable`, `test_modify_unavailable`.",
+        "content": {
+          "application/json": {
+            "schema": {
+              "$ref": "#/components/schemas/Error"
+            },
+            "examples": {
+              "unknownField": {
+                "summary": "A typo in the body.",
+                "value": {
+                  "error": {
+                    "code": "bad_request",
+                    "message": "Unknown field \"quantitty\". See the trades API docs for the fields you can send."
+                  }
+                }
+              }
+            }
+          }
+        }
+      },
+      "Unauthorized": {
+        "description": "No key, or a key that isn't valid. Codes: `missing_api_key`, `invalid_api_key`.",
+        "content": {
+          "application/json": {
+            "schema": {
+              "$ref": "#/components/schemas/Error"
+            },
+            "examples": {
+              "missing": {
+                "summary": "No key sent.",
+                "value": {
+                  "error": {
+                    "code": "missing_api_key",
+                    "message": "Send your Skylit API key in the Authorization header: Authorization: Bearer YOUR_SKYLIT_API_KEY."
+                  }
+                }
+              }
+            }
+          }
+        }
+      },
+      "Forbidden": {
+        "description": "The key works but the account can't do this. Codes: `account_suspended`, `nexus_access_denied`, `futures_access_denied`.",
+        "content": {
+          "application/json": {
+            "schema": {
+              "$ref": "#/components/schemas/Error"
+            },
+            "examples": {
+              "noNexus": {
+                "summary": "The account doesn't include Nexus.",
+                "value": {
+                  "error": {
+                    "code": "nexus_access_denied",
+                    "message": "This Skylit account doesn't include Nexus, so it can't place Nexus trades."
+                  }
+                }
+              }
+            }
+          }
+        }
+      },
+      "NotFound": {
+        "description": "Not on your account. Codes: `trade_not_found`, `account_not_found`, `order_not_found`.",
+        "content": {
+          "application/json": {
+            "schema": {
+              "$ref": "#/components/schemas/Error"
+            },
+            "examples": {
+              "trade": {
+                "summary": "Not your trade, or no such trade.",
+                "value": {
+                  "error": {
+                    "code": "trade_not_found",
+                    "message": "No trade with that id on your account."
+                  }
+                }
+              }
+            }
+          }
+        }
+      },
+      "Conflict": {
+        "description": "The order clashes with what you hold or sent before. Codes: `duplicate_position` (with `tradeId`), `trade_closed`, `open_position_limit`, `client_order_id_used`, `request_in_progress`, `account_locked`, `account_busy`, `account_ended`, `order_not_working`.",
+        "content": {
+          "application/json": {
+            "schema": {
+              "$ref": "#/components/schemas/Error"
+            },
+            "examples": {
+              "duplicate": {
+                "summary": "You already hold this contract.",
+                "value": {
+                  "error": {
+                    "code": "duplicate_position",
+                    "message": "You already hold an open position on this contract. Close it first, or add to it in Nexus.",
+                    "tradeId": "6f1c2a4e-8b1d-4c39-9a51-2d7e0b3c9f10"
+                  }
+                }
+              }
+            }
+          }
+        }
+      },
+      "Unprocessable": {
+        "description": "Read fine, but the market or the account says no. Codes: `market_closed`, `contract_expired`, `contract_not_offered`, `price_outside_market`, `insufficient_buying_power`, `account_not_tradable`, `account_ambiguous`, `reduce_only_would_open`, `order_refused`.",
+        "content": {
+          "application/json": {
+            "schema": {
+              "$ref": "#/components/schemas/Error"
+            },
+            "examples": {
+              "closed": {
+                "summary": "Outside market hours.",
+                "value": {
+                  "error": {
+                    "code": "market_closed",
+                    "message": "The market is closed for this contract right now, so nothing was filled."
+                  }
+                }
+              }
+            }
+          }
+        }
+      },
+      "RateLimited": {
+        "description": "Over a rate limit. Wait `Retry-After` seconds, then retry. Code: `rate_limited`.",
+        "headers": {
+          "Retry-After": {
+            "schema": {
+              "type": "integer",
+              "example": 12
+            }
+          },
+          "X-RateLimit-Limit": {
+            "schema": {
+              "type": "integer",
+              "example": 30
+            }
+          },
+          "X-RateLimit-Remaining": {
+            "schema": {
+              "type": "integer",
+              "example": 0
+            }
+          }
+        },
+        "content": {
+          "application/json": {
+            "schema": {
+              "$ref": "#/components/schemas/Error"
+            },
+            "examples": {
+              "limited": {
+                "summary": "Too many writes from this key.",
+                "value": {
+                  "error": {
+                    "code": "rate_limited",
+                    "message": "Too many requests (limit 30). Slow down and retry in 12 seconds."
+                  }
+                }
+              }
+            }
+          }
+        }
+      },
+      "InternalError": {
+        "description": "Something went wrong on our side. If you sent a `clientOrderId`, retry with the same one. Code: `internal_error`.",
+        "content": {
+          "application/json": {
+            "schema": {
+              "$ref": "#/components/schemas/Error"
+            },
+            "examples": {
+              "internal": {
+                "summary": "Retry with the same clientOrderId.",
+                "value": {
+                  "error": {
+                    "code": "internal_error",
+                    "message": "Something went wrong on our side. If you sent a clientOrderId, retry with the same one (it can't fill twice). Otherwise check your account before retrying."
+                  }
+                }
+              }
+            }
+          }
+        }
+      },
+      "Unavailable": {
+        "description": "Try again in a moment (honour `Retry-After` when it's sent). Codes: `stale_quote`, `no_live_price`, `rules_pending`, `unavailable`, `auth_unavailable`, `access_check_unavailable`, `api_keys_unavailable`, `trades_api_disabled`.",
+        "headers": {
+          "Retry-After": {
+            "schema": {
+              "type": "integer",
+              "example": 2
+            }
+          }
+        },
+        "content": {
+          "application/json": {
+            "schema": {
+              "$ref": "#/components/schemas/Error"
+            },
+            "examples": {
+              "noPrice": {
+                "summary": "No live price right now.",
+                "value": {
+                  "error": {
+                    "code": "no_live_price",
+                    "message": "There's no live price for this contract right now, so nothing was filled. Try again in a moment."
+                  }
+                }
+              }
+            }
+          }
+        }
+      }
+    },
+    "schemas": {
+      "Error": {
+        "type": "object",
+        "required": [
+          "error"
+        ],
+        "properties": {
+          "error": {
+            "type": "object",
+            "description": "`code` is stable, so branch on it. `message` is for a person and can change. `tradeId` comes with `duplicate_position`: the trade you already hold.",
+            "required": [
+              "code",
+              "message"
+            ],
+            "properties": {
+              "code": {
+                "type": "string"
+              },
+              "message": {
+                "type": "string"
+              },
+              "tradeId": {
+                "type": "string",
+                "format": "uuid"
+              }
+            }
+          }
+        }
+      },
+      "OpenTradeRequest": {
+        "type": "object",
+        "description": "The body of an open. Which fields apply depends on `assetClass`. A field that doesn't apply is refused with `400 bad_request`.",
+        "properties": {
+          "assetClass": {
+            "type": "string",
+            "enum": [
+              "options",
+              "stocks",
+              "futures"
+            ],
+            "default": "options",
+            "description": "Which book the order goes to."
+          },
+          "contract": {
+            "type": "string",
+            "description": "Options shorthand, like `SPY 600C 10/16` or `SPY 600C 10/16 @ 1.84`. Send this, or `ticker`, `strike`, `direction` and `expiration`."
+          },
+          "ticker": {
+            "type": "string",
+            "description": "A symbol like `SPY`. For futures, a product like `NQ` (the front month) or one contract like `NQZ26`."
+          },
+          "direction": {
+            "type": "string",
+            "enum": [
+              "call",
+              "put"
+            ],
+            "description": "Options only."
+          },
+          "strike": {
+            "type": "number",
+            "description": "Options only, like `600` or `602.5`."
+          },
+          "expiration": {
+            "type": "string",
+            "format": "date",
+            "description": "Options only, like `2026-10-16`."
+          },
+          "side": {
+            "type": "string",
+            "enum": [
+              "buy",
+              "sell"
+            ],
+            "description": "Stocks and futures. Options are always bought to open."
+          },
+          "quantity": {
+            "type": "integer",
+            "description": "Options 1 to 1,000 contracts, stocks 1 to 100,000 shares, futures 1 to 100 contracts."
+          },
+          "price": {
+            "type": "number",
+            "description": "Options and stocks: your own fill price, taken only inside the window around the live quote."
+          },
+          "ifOutside": {
+            "type": "string",
+            "enum": [
+              "reject",
+              "market"
+            ],
+            "default": "reject",
+            "description": "What happens when `price` is outside the window: refuse, or fill at market."
+          },
+          "orderType": {
+            "type": "string",
+            "enum": [
+              "market",
+              "limit",
+              "stop"
+            ],
+            "default": "market",
+            "description": "Options and stocks take `market` only. Futures also take `limit` (with `limitPrice`) and `stop` (with `stopPrice`)."
+          },
+          "limitPrice": {
+            "type": "number",
+            "description": "Futures limit orders: the price the order rests at."
+          },
+          "stopPrice": {
+            "type": "number",
+            "description": "Futures stop orders: the price that triggers it."
+          },
+          "stopLoss": {
+            "type": "number",
+            "description": "Futures: a stop loss placed with the entry."
+          },
+          "takeProfit": {
+            "type": "number",
+            "description": "Futures: a take profit placed with the entry."
+          },
+          "trailingStop": {
+            "type": "boolean",
+            "description": "Futures: the stop loss trails the price. Needs `stopLoss`."
+          },
+          "reduceOnly": {
+            "type": "boolean",
+            "description": "Futures: only take contracts off a position you hold, never open, add or flip. Market orders with no bracket."
+          },
+          "account": {
+            "type": "string",
+            "description": "Futures: `practice` (the default), `evaluation`, `funded`, or an account id."
+          },
+          "clientOrderId": {
+            "type": "string",
+            "description": "Your own id for safe retries. 1 to 64 letters, digits, or `_ . : -`."
+          },
+          "test": {
+            "type": "boolean",
+            "description": "`true` checks and prices the order, then keeps it in your test log instead of placing it."
+          }
+        }
+      },
+      "ExitRequest": {
+        "type": "object",
+        "description": "Send `quantity` or `closeAll`, not both.",
+        "properties": {
+          "quantity": {
+            "type": "integer",
+            "description": "How many to sell, 1 or more."
+          },
+          "closeAll": {
+            "type": "boolean",
+            "description": "`true` sells everything that's left."
+          },
+          "price": {
+            "type": "number",
+            "description": "Your own fill price, inside the window."
+          },
+          "ifOutside": {
+            "type": "string",
+            "enum": [
+              "reject",
+              "market"
+            ],
+            "default": "reject",
+            "description": "What happens when `price` is outside the window."
+          },
+          "orderType": {
+            "type": "string",
+            "enum": [
+              "market"
+            ],
+            "default": "market",
+            "description": "Exits are market orders."
+          },
+          "clientOrderId": {
+            "type": "string",
+            "description": "Your own id for safe retries."
+          },
+          "test": {
+            "type": "boolean",
+            "description": "Optional. The trade decides: a test order's exit is always a test."
+          }
+        }
+      },
+      "CloseRequest": {
+        "type": "object",
+        "description": "Send `ticker` or `closeAll`, not both.",
+        "properties": {
+          "ticker": {
+            "type": "string",
+            "description": "The position to close, like `NQ` or `NQZ26`."
+          },
+          "closeAll": {
+            "type": "boolean",
+            "description": "`true` flattens every position in the account."
+          },
+          "clientOrderId": {
+            "type": "string",
+            "description": "Your own id for safe retries."
+          },
+          "test": {
+            "type": "boolean",
+            "description": "`true` previews the close against what the account really holds, and places nothing."
+          }
+        }
+      },
+      "CancelRequest": {
+        "type": "object",
+        "description": "Send `cancelAll` or `ticker`, not both.",
+        "properties": {
+          "cancelAll": {
+            "type": "boolean",
+            "description": "`true` cancels every resting order on the account."
+          },
+          "ticker": {
+            "type": "string",
+            "description": "Cancel only this contract's orders, like `NQ`."
+          },
+          "test": {
+            "type": "boolean",
+            "description": "`true` cancels the account's test orders in your test log only."
+          }
+        }
+      },
+      "ModifyRequest": {
+        "type": "object",
+        "required": [
+          "price"
+        ],
+        "properties": {
+          "price": {
+            "type": "number",
+            "description": "The order's new price, above 0."
+          },
+          "test": {
+            "type": "boolean",
+            "description": "Test orders can't be moved, so `true` is always refused."
+          }
+        }
+      },
+      "TestFlag": {
+        "type": "object",
+        "properties": {
+          "test": {
+            "type": "boolean",
+            "description": "`true` acts on a test order in your test log only."
+          }
+        }
+      },
+      "OrderMeta": {
+        "type": "object",
+        "description": "Extra facts about an order. Each field is there only when it applies.",
+        "properties": {
+          "fill": {
+            "type": "object",
+            "description": "The fill: `price`, `priceSource` (`market` or `client`), and when you sent a price, the `bid` and `ask` it was checked against. On an exit, `quantity` is how many sold."
+          },
+          "clientOrderId": {
+            "type": "string"
+          },
+          "idempotentReplay": {
+            "type": "boolean",
+            "description": "This answer is a repeat of an earlier order with the same `clientOrderId`."
+          },
+          "test": {
+            "type": "boolean",
+            "description": "A test order: nothing was placed."
+          },
+          "notChecked": {
+            "type": "array",
+            "items": {
+              "type": "string"
+            },
+            "description": "Futures test orders: what the preview couldn't check, like `account_rules_judgment` or `bracket_netting`."
+          },
+          "discordRouting": {
+            "type": "object",
+            "description": "Where Nexus routed the trade to Discord, when it did."
+          },
+          "nothingToClose": {
+            "type": "boolean"
+          },
+          "stillOpen": {
+            "type": "array",
+            "items": {
+              "type": "string"
+            },
+            "description": "A repeated `closeAll`: positions still open."
+          }
+        }
+      },
+      "ListMeta": {
+        "type": "object",
+        "properties": {
+          "total": {
+            "type": "integer"
+          },
+          "limit": {
+            "type": "integer"
+          },
+          "offset": {
+            "type": "integer"
+          },
+          "test": {
+            "type": "boolean",
+            "description": "With `test=true`: this is your test log."
+          },
+          "maxRows": {
+            "type": "integer",
+            "description": "With `test=true`: how many test orders the log keeps (10)."
+          }
+        }
+      },
+      "Trade": {
+        "type": "object",
+        "description": "An options or stock trade, as Nexus shows it. Stocks use `direction` `call` for long and `put` for short, strike 0 and today's date. Nexus may add other fields it shows on a trade (Greeks, P/L, reactions).",
+        "properties": {
+          "id": {
+            "type": "string",
+            "format": "uuid"
+          },
+          "userId": {
+            "type": "string",
+            "format": "uuid"
+          },
+          "ticker": {
+            "type": "string"
+          },
+          "strike": {
+            "type": "number"
+          },
+          "expiration": {
+            "type": "string",
+            "format": "date"
+          },
+          "direction": {
+            "type": "string",
+            "enum": [
+              "call",
+              "put"
+            ]
+          },
+          "assetClass": {
+            "type": "string",
+            "enum": [
+              "options",
+              "stocks"
+            ]
+          },
+          "averageEntryPrice": {
+            "type": "number"
+          },
+          "currentPrice": {
+            "type": "number",
+            "description": "The latest mark."
+          },
+          "totalQuantity": {
+            "type": "integer"
+          },
+          "remainingQuantity": {
+            "type": "integer"
+          },
+          "status": {
+            "type": "string",
+            "enum": [
+              "active",
+              "closed"
+            ]
+          },
+          "entryDate": {
+            "type": "string",
+            "format": "date-time"
+          },
+          "exitDate": {
+            "type": "string",
+            "format": "date-time"
+          },
+          "exits": {
+            "type": "array",
+            "items": {
+              "$ref": "#/components/schemas/TradeExit"
+            }
+          },
+          "source": {
+            "type": "string",
+            "description": "`api` on a trade a key opened."
+          },
+          "test": {
+            "type": "boolean",
+            "description": "`true` on a test order."
+          }
+        }
+      },
+      "TradeExit": {
+        "type": "object",
+        "properties": {
+          "id": {
+            "type": "string",
+            "format": "uuid"
+          },
+          "price": {
+            "type": "number"
+          },
+          "quantity": {
+            "type": "integer"
+          },
+          "date": {
+            "type": "string",
+            "format": "date-time"
+          },
+          "type": {
+            "type": "string",
+            "enum": [
+              "partial",
+              "full"
+            ]
+          },
+          "orderType": {
+            "type": "string"
+          }
+        }
+      },
+      "FuturesAccountRef": {
+        "type": "object",
+        "properties": {
+          "id": {
+            "type": "string",
+            "format": "uuid"
+          },
+          "kind": {
+            "type": "string",
+            "enum": [
+              "practice",
+              "evaluation",
+              "funded"
+            ]
+          },
+          "name": {
+            "type": "string"
+          }
+        }
+      },
+      "FuturesOrder": {
+        "type": "object",
+        "description": "A futures order. It's not a `Trade`: futures keep their own book. Prices are in index points, money in cents.",
+        "properties": {
+          "id": {
+            "type": "string",
+            "format": "uuid"
+          },
+          "assetClass": {
+            "type": "string",
+            "enum": [
+              "futures"
+            ]
+          },
+          "source": {
+            "type": "string",
+            "description": "`api` when a key placed it. Left out on an order you placed in Nexus."
+          },
+          "account": {
+            "$ref": "#/components/schemas/FuturesAccountRef"
+          },
+          "symbol": {
+            "type": "string",
+            "description": "The contract, like `NQZ26`."
+          },
+          "side": {
+            "type": "string",
+            "enum": [
+              "buy",
+              "sell"
+            ]
+          },
+          "quantity": {
+            "type": "integer"
+          },
+          "role": {
+            "type": "string",
+            "enum": [
+              "entry",
+              "close",
+              "stop_loss",
+              "take_profit"
+            ]
+          },
+          "orderType": {
+            "type": "string",
+            "enum": [
+              "market",
+              "limit",
+              "stop"
+            ]
+          },
+          "status": {
+            "type": "string",
+            "enum": [
+              "working",
+              "held",
+              "filled",
+              "cancelled",
+              "rejected"
+            ],
+            "description": "`held` is a stop or target waiting for its entry to fill."
+          },
+          "statusReason": {
+            "type": "string",
+            "description": "Why it was cancelled or rejected."
+          },
+          "limitPrice": {
+            "type": "number"
+          },
+          "stopPrice": {
+            "type": "number"
+          },
+          "trailingDistance": {
+            "type": "number",
+            "description": "A trailing stop: how far behind the price it follows, in points."
+          },
+          "fillPrice": {
+            "type": "number"
+          },
+          "placedAt": {
+            "type": "string",
+            "format": "date-time"
+          },
+          "filledAt": {
+            "type": "string",
+            "format": "date-time"
+          },
+          "parentId": {
+            "type": "string",
+            "format": "uuid",
+            "description": "On a stop or target: the entry it was placed with."
+          },
+          "bracket": {
+            "type": "array",
+            "items": {
+              "type": "object"
+            },
+            "description": "The stop and target placed with this order, each a `FuturesOrder` with its own id."
+          },
+          "clientOrderId": {
+            "type": "string"
+          },
+          "keyId": {
+            "type": "string",
+            "description": "The public id of the key that placed it."
+          },
+          "commissionCents": {
+            "type": "integer"
+          },
+          "realizedPnlCents": {
+            "type": "integer",
+            "description": "Gross realized P/L of this fill. 0 on a fill that only opened."
+          },
+          "test": {
+            "type": "boolean",
+            "description": "`true` on a test order."
+          }
+        }
+      },
+      "FuturesAccount": {
+        "type": "object",
+        "properties": {
+          "id": {
+            "type": "string",
+            "format": "uuid"
+          },
+          "kind": {
+            "type": "string",
+            "enum": [
+              "practice",
+              "evaluation",
+              "funded"
+            ]
+          },
+          "name": {
+            "type": "string"
+          },
+          "status": {
+            "type": "string",
+            "enum": [
+              "active",
+              "daily_locked",
+              "failed",
+              "passed",
+              "closed"
+            ],
+            "description": "`daily_locked` lifts at the next session."
+          },
+          "balanceCents": {
+            "type": "integer"
+          },
+          "challenge": {
+            "type": "boolean",
+            "description": "A challenge entry. Readable, not tradable through the API."
+          },
+          "tradable": {
+            "type": "boolean",
+            "description": "Whether an order or a close may name this account."
+          },
+          "reason": {
+            "type": "string",
+            "description": "Why it isn't tradable."
+          },
+          "allowed": {
+            "type": "array",
+            "items": {
+              "type": "string"
+            },
+            "description": "`read` always. When tradable also `open`, `reduce`, `close`, `limit`, `stop`, `bracket`, `cancel`, `modify`."
+          }
+        }
+      },
+      "FuturesPosition": {
+        "type": "object",
+        "properties": {
+          "symbol": {
+            "type": "string"
+          },
+          "side": {
+            "type": "string",
+            "enum": [
+              "long",
+              "short"
+            ]
+          },
+          "quantity": {
+            "type": "integer",
+            "description": "Contracts held, always positive."
+          },
+          "avgPrice": {
+            "type": "number"
+          },
+          "breakevenPrice": {
+            "type": "number",
+            "description": "Includes the round-trip commission."
+          },
+          "markPrice": {
+            "type": "number"
+          },
+          "openPnlCents": {
+            "type": "integer"
+          },
+          "pointValueCents": {
+            "type": "integer"
+          },
+          "tickSize": {
+            "type": "number"
+          }
+        }
+      },
+      "FuturesAccountState": {
+        "type": "object",
+        "properties": {
+          "account": {
+            "type": "object",
+            "description": "A `FuturesAccount` plus `statusReason`, `startingBalanceCents`, `dayStartBalanceCents`, `tradingDay`, and when every position is priced `openPnlCents`, `equityCents` and `dayPnlCents`."
+          },
+          "positions": {
+            "type": "array",
+            "items": {
+              "$ref": "#/components/schemas/FuturesPosition"
+            }
+          },
+          "workingOrders": {
+            "type": "array",
+            "items": {
+              "$ref": "#/components/schemas/FuturesOrder"
+            }
+          },
+          "rules": {
+            "type": "object",
+            "description": "Evaluation and funded accounts only: the rule meter, as the Nexus account panel reads it. Room to the daily loss limit (`toDailyLimitCents`), to the max loss floor (`toMaxLossCents`), to the profit target (`toTargetCents`), the contract cap (`maxContracts`, `openContracts`), trading days and what blocks a pass (`passBlockedBy`)."
+          }
+        }
+      },
+      "FuturesClose": {
+        "type": "object",
+        "properties": {
+          "account": {
+            "$ref": "#/components/schemas/FuturesAccountRef"
+          },
+          "closed": {
+            "type": "array",
+            "items": {
+              "$ref": "#/components/schemas/FuturesOrder"
+            }
+          }
+        }
+      },
+      "FuturesCancelled": {
+        "type": "object",
+        "properties": {
+          "account": {
+            "$ref": "#/components/schemas/FuturesAccountRef"
+          },
+          "cancelled": {
+            "type": "array",
+            "items": {
+              "$ref": "#/components/schemas/FuturesOrder"
+            }
+          }
+        }
+      },
+      "Capabilities": {
+        "type": "object",
+        "properties": {
+          "assetClasses": {
+            "type": "array",
+            "items": {
+              "type": "object"
+            },
+            "description": "One entry per asset class: `assetClass`, `available`, `orderTypes`, and `reason` when it isn't available."
+          },
+          "orderTypes": {
+            "type": "array",
+            "items": {
+              "type": "string"
+            },
+            "description": "What every asset class takes (`market`). Futures list more under `futures`."
+          },
+          "testOrders": {
+            "type": "boolean",
+            "description": "Whether `\"test\": true` is accepted."
+          },
+          "futures": {
+            "type": "object",
+            "description": "Only when your account has futures: `marketOpen`, `reopensAt` while closed, `maxOrderQuantity`, `orderTypes`, `bracket`, `modify`, the `contracts` you can trade (with the front month, tick size and value, commission, and whether there's a live price) and your `accounts` (each a `FuturesAccount`)."
+          },
+          "limits": {
+            "type": "object",
+            "description": "Your per-key `writesPerMinute` and `readsPerMinute`."
+          }
+        }
+      }
+    }
+  }
+}
