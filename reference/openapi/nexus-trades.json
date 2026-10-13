@@ -31,7 +31,7 @@
     },
     {
       "name": "Options and stocks",
-      "description": "Open a trade, add to it, trim or close it, and read your trades. Options are bought to open. Market orders fill now. An options limit, or a stock limit or stop, rests on your wallet until the market gets there (see Options and stocks resting orders). The same open route takes futures too (see Futures)."
+      "description": "Open a trade, add to it, trim or close it, and read your trades. Options are bought to open. Market orders fill now. An options limit, or a stock limit or stop, rests on your wallet until the market gets there (see Options and stocks resting orders). The same open route takes futures too (see Futures).\n\n**Prices:** `GET /api/nexus/v1/trades?status=open` gives each open trade a live `mark` (price, bid, ask and P/L right now), and `GET /api/nexus/v1/trading/quotes` reads any contract's live bid and ask by its OCC symbol. Both use the same quotes your paper fills use."
     },
     {
       "name": "Options and stocks resting orders",
@@ -224,6 +224,13 @@
                             "agent"
                           ]
                         },
+                        "quotes": {
+                          "read": "GET /api/nexus/v1/trading/quotes?symbols={OCC symbol},...",
+                          "symbolFormat": "OCC, like SPXW261016C07800000 (root, YYMMDD, C or P, strike x 1000 in 8 digits)",
+                          "maxSymbols": 20,
+                          "maxQuoteAgeSeconds": 15,
+                          "marks": "GET /api/nexus/v1/trades?status=open: each open trade carries mark (live price, bid, ask and P&L) and currentPrice"
+                        },
                         "optionsOrders": {
                           "orderTypes": [
                             "limit"
@@ -383,6 +390,118 @@
                         "openCostBasisCents": 85300,
                         "openMarketValueCents": 91200,
                         "equityCents": 10018300
+                      }
+                    }
+                  }
+                }
+              }
+            }
+          },
+          "400": {
+            "$ref": "#/components/responses/BadRequest"
+          },
+          "401": {
+            "$ref": "#/components/responses/Unauthorized"
+          },
+          "403": {
+            "$ref": "#/components/responses/Forbidden"
+          },
+          "429": {
+            "$ref": "#/components/responses/RateLimited"
+          },
+          "500": {
+            "$ref": "#/components/responses/InternalError"
+          },
+          "503": {
+            "$ref": "#/components/responses/Unavailable"
+          }
+        }
+      }
+    },
+    "/api/nexus/v1/trading/quotes": {
+      "get": {
+        "operationId": "getQuotes",
+        "tags": [
+          "Options and stocks"
+        ],
+        "summary": "Read live option quotes",
+        "description": "The live bid, ask and mid of up to 20 option contracts, by OCC symbol. These are the quotes your paper fills use, read by the same rules, so a `live` quote is what a market order would get right now: a buy at the ask, a sell at the bid.\n\n- When a quote isn't live (the market's shut, the quote's more than 15 seconds old, no quote, or no such contract) you get `live: false`, a `reason`, and no prices at all. Hold off rather than guess.\n- A live quote with no bid or no ask has no `mark` (`reason: one_sided`).\n- For your own open trades you don't need this: `GET /api/nexus/v1/trades?status=open` gives each one its live `mark` and P/L.\n\nSymbols are OCC: the root, the expiration as YYMMDD, `C` or `P`, then the strike times 1000 in 8 digits. `SPXW261016C07800000` is the SPXW 7800 call expiring 2026-10-16, and `QQQ261016P00740000` the QQQ 740 put. Lowercase, the padded 21 character form and an `O:` prefix work too. One call counts as one read.",
+        "parameters": [
+          {
+            "name": "symbols",
+            "in": "query",
+            "required": true,
+            "description": "One or more OCC option symbols, comma separated (at most 20).",
+            "schema": {
+              "type": "string",
+              "example": "SPXW261016C07800000,QQQ261016P00740000"
+            }
+          }
+        ],
+        "responses": {
+          "200": {
+            "description": "One quote per symbol, in the order you sent them.",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "type": "object",
+                  "properties": {
+                    "data": {
+                      "type": "array",
+                      "items": {
+                        "$ref": "#/components/schemas/OptionQuote"
+                      }
+                    },
+                    "meta": {
+                      "type": "object",
+                      "properties": {
+                        "asOf": {
+                          "type": "string",
+                          "format": "date-time"
+                        },
+                        "maxQuoteAgeSeconds": {
+                          "type": "integer",
+                          "description": "How old a quote can be and still be live (15)."
+                        }
+                      }
+                    }
+                  }
+                },
+                "examples": {
+                  "default": {
+                    "summary": "One live quote and one that's gone quiet.",
+                    "value": {
+                      "data": [
+                        {
+                          "symbol": "SPXW261016C07800000",
+                          "ticker": "SPXW",
+                          "expiration": "2026-10-16",
+                          "strike": 7800,
+                          "direction": "call",
+                          "live": true,
+                          "bid": 41.1,
+                          "ask": 41.7,
+                          "mark": 41.4,
+                          "underlyingPrice": 7812.25,
+                          "quoteTime": "2026-10-14T15:31:02Z",
+                          "ageMs": 640
+                        },
+                        {
+                          "symbol": "QQQ261016P00740000",
+                          "ticker": "QQQ",
+                          "expiration": "2026-10-16",
+                          "strike": 740,
+                          "direction": "put",
+                          "live": false,
+                          "reason": "stale_quote",
+                          "underlyingPrice": 738.9,
+                          "quoteTime": "2026-10-14T15:30:21Z",
+                          "ageMs": 41640
+                        }
+                      ],
+                      "meta": {
+                        "asOf": "2026-10-14T15:31:02.64Z",
+                        "maxQuoteAgeSeconds": 15
                       }
                     }
                   }
@@ -828,7 +947,6 @@
                         "direction": "call",
                         "assetClass": "options",
                         "averageEntryPrice": 1.84,
-                        "currentPrice": 1.84,
                         "totalQuantity": 2,
                         "remainingQuantity": 2,
                         "status": "active",
@@ -1025,7 +1143,7 @@
           "Options and stocks"
         ],
         "summary": "List your trades",
-        "description": "Your own options and stock trades, newest first. `account=agent` lists your bot's agent wallet instead of yours.\n\n**Futures:** add `assetClass=futures` to list one futures account's trades. Leave `account` out for your practice account, or send `agent`, `evaluation`, `funded` or an account id. `status=open` lists the open positions with the same numbers as the account read. `status=closed` lists closed trades, flat to flat, with the same P/L your futures journal shows, newest first. Leave `status` out for both, open first. A futures row is a `FuturesTrade`, not a `Trade`. Without `assetClass=futures` the list is options and stocks, same as always.\n\nWith `test=true` it lists your test log instead (your 10 newest test orders, futures ones included) and never a real trade.",
+        "description": "Your own options and stock trades, newest first. `account=agent` lists your bot's agent wallet instead of yours.\n\n**Live prices:** each open trade comes with `mark`, read from the live quote when you ask: the price (the mid of the bid and ask), the bid a market exit would sell at, and the trade's P/L at that price. `currentPrice` is the same price. When there's no live quote (the market's shut, the quote's more than 15 seconds old, or there's no bid or no ask), `mark.live` is `false`, `mark.reason` says why, and no price is sent at all. Your bot should hold off rather than guess. `unrealizedPnlPercent` and the other P/L fields on the trade itself are the last saved mark, up to about 30 seconds old.\n\n**Futures:** add `assetClass=futures` to list one futures account's trades. Leave `account` out for your practice account, or send `agent`, `evaluation`, `funded` or an account id. `status=open` lists the open positions with the same numbers as the account read. `status=closed` lists closed trades, flat to flat, with the same P/L your futures journal shows, newest first. Leave `status` out for both, open first. A futures row is a `FuturesTrade`, not a `Trade`. Without `assetClass=futures` the list is options and stocks, same as always.\n\nWith `test=true` it lists your test log instead (your 10 newest test orders, futures ones included) and never a real trade.",
         "parameters": [
           {
             "name": "assetClass",
@@ -1136,12 +1254,25 @@
                           "direction": "call",
                           "assetClass": "options",
                           "averageEntryPrice": 1.84,
-                          "currentPrice": 1.97,
+                          "currentPrice": 2.21,
                           "totalQuantity": 2,
                           "remainingQuantity": 2,
                           "status": "active",
                           "entryDate": "2026-10-09T14:32:05Z",
-                          "source": "api"
+                          "source": "api",
+                          "mark": {
+                            "live": true,
+                            "price": 2.21,
+                            "bid": 2.19,
+                            "ask": 2.23,
+                            "underlyingPrice": 601.42,
+                            "quoteTime": "2026-10-09T15:10:02Z",
+                            "ageMs": 850,
+                            "unrealizedPnlPercent": 20.1087,
+                            "unrealizedPnlDollars": 74,
+                            "totalPnlPercent": 20.1087,
+                            "totalPnlDollars": 74
+                          }
                         }
                       ],
                       "meta": {
@@ -1669,7 +1800,7 @@
           "Options and stocks"
         ],
         "summary": "Read one trade",
-        "description": "One of your options or stock trades, or one of your test orders (marked `\"test\": true`).",
+        "description": "One of your options or stock trades, or one of your test orders (marked `\"test\": true`). An open trade comes with its live `mark`, as on the list.",
         "parameters": [
           {
             "$ref": "#/components/parameters/TradeId"
@@ -3426,7 +3557,7 @@
     },
     "responses": {
       "BadRequest": {
-        "description": "The request was refused before anything was traded. Codes: `bad_request`, `bad_contract`, `invalid_quantity`, `invalid_price`, `unsupported_asset_class`, `unsupported_order_type`, `only_market_orders`, `limit_price_required` (a limit with no `limitPrice`), `invalid_limit_price` (not in cents, or outside 0.01 to 99,999.99 for options or 999,999.99 for stocks), `stop_price_required` (a stop with no `stopPrice`), `invalid_stop_price` (not in cents, or outside 0.01 to 999,999.99), `invalid_take_profit`, `test_orders_unavailable`, `test_modify_unavailable`.",
+        "description": "The request was refused before anything was traded. Codes: `bad_request`, `bad_contract`, `invalid_quantity`, `invalid_price`, `unsupported_asset_class`, `unsupported_order_type`, `only_market_orders`, `limit_price_required` (a limit with no `limitPrice`), `invalid_limit_price` (not in cents, or outside 0.01 to 99,999.99 for options or 999,999.99 for stocks), `stop_price_required` (a stop with no `stopPrice`), `invalid_stop_price` (not in cents, or outside 0.01 to 999,999.99), `invalid_take_profit`, `test_orders_unavailable`, `test_modify_unavailable`, `bad_symbol` (a quotes symbol that isn't OCC).",
         "content": {
           "application/json": {
             "schema": {
@@ -4526,7 +4657,10 @@
           },
           "currentPrice": {
             "type": "number",
-            "description": "The latest mark."
+            "description": "The live mark, the same as `mark.price`. Only on `GET /trades` and `GET /trades/{id}`, and only on an open trade with a live quote. Left out everywhere else. It's never your entry price."
+          },
+          "mark": {
+            "$ref": "#/components/schemas/TradeMark"
           },
           "totalQuantity": {
             "type": "integer"
@@ -4562,6 +4696,122 @@
           "test": {
             "type": "boolean",
             "description": "`true` on a test order."
+          }
+        }
+      },
+      "TradeMark": {
+        "type": "object",
+        "description": "An open trade's position at the live quote, read when you asked. Only on open trades, on `GET /trades` and `GET /trades/{id}`. When `live` is `false` there's no price and no P/L, just the `reason`.",
+        "properties": {
+          "live": {
+            "type": "boolean",
+            "description": "`true` when a market order on this contract would be priced from this quote right now."
+          },
+          "reason": {
+            "type": "string",
+            "enum": [
+              "stale_quote",
+              "market_closed",
+              "one_sided",
+              "no_quote",
+              "contract_not_found",
+              "no_entry_price",
+              "not_marked"
+            ],
+            "description": "Why there's no price: `stale_quote` (the quote's more than 15 seconds old), `market_closed` (outside the contract's trading hours, or it's expired), `one_sided` (live, but no bid or no ask, so no mid to mark at), `no_quote` (no quote right now), `contract_not_found`, `not_marked` (this page holds open trades on more than 25 expirations, so ask for fewer with `limit`)."
+          },
+          "price": {
+            "type": "number",
+            "description": "The mark. The mid of the live bid and ask (a stock's live price). Same as the trade's `currentPrice`."
+          },
+          "bid": {
+            "type": "number",
+            "description": "What a market exit would sell at right now."
+          },
+          "ask": {
+            "type": "number"
+          },
+          "underlyingPrice": {
+            "type": "number"
+          },
+          "quoteTime": {
+            "type": "string",
+            "format": "date-time",
+            "description": "When the quote was made."
+          },
+          "ageMs": {
+            "type": "integer",
+            "description": "How old the quote was when you read it, in milliseconds."
+          },
+          "unrealizedPnlPercent": {
+            "type": "number",
+            "description": "The open contracts at `price` against your average entry, in percent. This is the number to trim on."
+          },
+          "unrealizedPnlDollars": {
+            "type": "number"
+          },
+          "totalPnlPercent": {
+            "type": "number",
+            "description": "The whole trade: what you've already taken off plus the open contracts at `price`."
+          },
+          "totalPnlDollars": {
+            "type": "number"
+          }
+        }
+      },
+      "OptionQuote": {
+        "type": "object",
+        "description": "One contract's live quote. When `live` is `false` there's no bid, ask or mark, just the `reason`.",
+        "properties": {
+          "symbol": {
+            "type": "string",
+            "description": "The OCC symbol, cleaned up (no spaces, no prefix).",
+            "example": "SPXW261016C07800000"
+          },
+          "ticker": {
+            "type": "string"
+          },
+          "expiration": {
+            "type": "string",
+            "format": "date"
+          },
+          "strike": {
+            "type": "number"
+          },
+          "direction": {
+            "type": "string",
+            "enum": [
+              "call",
+              "put"
+            ]
+          },
+          "live": {
+            "type": "boolean",
+            "description": "`true` when a market order on this contract would fill from this quote right now: a buy at `ask`, a sell at `bid`."
+          },
+          "reason": {
+            "type": "string",
+            "description": "When it isn't live (`stale_quote`, `market_closed`, `no_quote`, `contract_not_found`), or `one_sided` on a live quote with no mid."
+          },
+          "bid": {
+            "type": "number"
+          },
+          "ask": {
+            "type": "number"
+          },
+          "mark": {
+            "type": "number",
+            "description": "The mid of the bid and ask: what open positions are marked at."
+          },
+          "underlyingPrice": {
+            "type": "number"
+          },
+          "quoteTime": {
+            "type": "string",
+            "format": "date-time"
+          },
+          "ageMs": {
+            "type": "integer"
           }
         }
       },
@@ -4922,6 +5172,10 @@
           "wallets": {
             "type": "object",
             "description": "The wallet read (`read`) and its `books` (`main`, `agent`)."
+          },
+          "quotes": {
+            "type": "object",
+            "description": "Where live prices are. The quotes `read`, its `symbolFormat` (OCC), `maxSymbols` (20), `maxQuoteAgeSeconds` (15), and `marks`, the read that gives each open trade its live mark."
           },
           "optionsOrders": {
             "type": "object",

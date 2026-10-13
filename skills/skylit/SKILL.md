@@ -108,6 +108,10 @@ private, people who copy their trades get it. Treat every write like a real orde
    A new id is a new order.
 5. **Read before you act.** Check `nexus_trades`, `nexus_futures_account` or
    `nexus_futures_working_orders` before exiting, closing or cancelling.
+6. **Trim and exit on a live price.** Each open trade from `nexus_trades` has a
+   `mark` with its live price, bid and `unrealizedPnlPercent`. `nexus_quotes`
+   reads any contract by OCC symbol. When `live` is `false` there's no price:
+   wait and read again, and never treat a missing price as the entry price.
 
 Rules the server enforces (don't fight them, explain them):
 
