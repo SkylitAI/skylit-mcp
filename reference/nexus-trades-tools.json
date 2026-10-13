@@ -3,8 +3,8 @@
   "spec": "openapi/nexus-trades.json",
   "baseUrl": "https://app.skylit.ai",
   "notes": "Trading tools for the member's own Nexus paper accounts, on their own opt-in tool list. Each tool calls one Nexus Trades API route with the member's Skylit API key. Arguments named like a path placeholder fill the path; on GET the rest go in the query string, on POST the rest are the JSON body. Hand-kept: scripts/sync.py --check fails when a tool and the spec disagree.",
-  "pendingProduction": "Tools and arguments marked \"x-requires\": \"second-prod-set\" (options and stock limits and stops, options stop-losses, the wallet order routes, adds, futures stop-limit and size change, futures in nexus_trades) are on the Nexus staging API only. Serve them once production has them (nexus #795, #796 and the #791 port). The agent account and nexus_wallet are on production.",
-  "count": 20,
+  "pendingProduction": "Tools and arguments marked \"x-requires\": \"second-prod-set\" (options and stock limits and stops, options stop-losses, the wallet order routes, adds, futures stop-limit and size change, futures in nexus_trades) are on the Nexus staging API only. Serve them once production has them (nexus #795, #796 and the #791 port). The agent account and nexus_wallet are on production. nexus_quotes (\"x-requires\": \"live-prices\") and the live mark on nexus_trades and nexus_trade are on the Nexus staging API only until nexus #901 reaches production.",
+  "count": 21,
   "tools": [
     {
       "name": "nexus_capabilities",
@@ -23,7 +23,7 @@
       "endpoint": "GET /api/nexus/v1/trades",
       "operationId": "listTrades",
       "annotations": { "readOnlyHint": true, "destructiveHint": false, "idempotentHint": true, "openWorldHint": false },
-      "description": "Your Nexus paper options and stock trades. Read only. Filter by status and page with limit and offset. account: agent lists your bot's agent wallet instead. assetClass: futures lists one futures account's open positions and closed trades (needs the second production set). With test: true it lists your test log (your 10 newest test orders) instead.",
+      "description": "Your Nexus paper options and stock trades. Read only. Filter by status and page with limit and offset. account: agent lists your bot's agent wallet instead. assetClass: futures lists one futures account's open positions and closed trades (needs the second production set). With test: true it lists your test log (your 10 newest test orders) instead. Each open trade has mark: its live price, bid and unrealizedPnlPercent right now (trim on that). When mark.live is false there's no price: wait and read again, never treat it as the entry price (needs nexus #901 on production).",
       "inputSchema": {
         "type": "object",
         "properties": {
@@ -44,7 +44,7 @@
       "endpoint": "GET /api/nexus/v1/trades/{id}",
       "operationId": "getTrade",
       "annotations": { "readOnlyHint": true, "destructiveHint": false, "idempotentHint": true, "openWorldHint": false },
-      "description": "One of your Nexus paper options or stock trades, with its exits. Read only. Works with a test order's id too.",
+      "description": "One of your Nexus paper options or stock trades, with its exits. Read only. Works with a test order's id too. An open trade has its live mark, as on nexus_trades.",
       "inputSchema": {
         "type": "object",
         "properties": {
@@ -287,6 +287,24 @@
           "book": { "type": "string", "enum": ["main", "agent"], "description": "main is the user's own paper wallet, agent is their bot's." }
         },
         "required": ["book"],
+        "additionalProperties": false
+      }
+    },
+    {
+      "name": "nexus_quotes",
+      "title": "Read live Nexus option quotes",
+      "section": "Options and stocks",
+      "endpoint": "GET /api/nexus/v1/trading/quotes",
+      "operationId": "getQuotes",
+      "x-requires": "live-prices",
+      "annotations": { "readOnlyHint": true, "destructiveHint": false, "idempotentHint": true, "openWorldHint": false },
+      "description": "Live bid, ask and mid for up to 20 option contracts by OCC symbol, from the same quotes Nexus paper fills use. Read only. A live quote is what a market order gets right now: a buy at ask, a sell at bid. When live is false there are no prices, just a reason (stale_quote, market_closed, no_quote, contract_not_found): wait and read again, never guess. For trades you already hold, nexus_trades gives each open one its live mark and P/L.",
+      "inputSchema": {
+        "type": "object",
+        "properties": {
+          "symbols": { "type": "string", "description": "One or more OCC option symbols, comma separated, at most 20. Like SPXW261016C07800000 (root, YYMMDD, C or P, strike x 1000 in 8 digits)." }
+        },
+        "required": ["symbols"],
         "additionalProperties": false
       }
     },
