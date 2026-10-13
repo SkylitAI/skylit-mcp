@@ -4715,9 +4715,10 @@
               "one_sided",
               "no_quote",
               "contract_not_found",
-              "no_entry_price"
+              "no_entry_price",
+              "not_marked"
             ],
-            "description": "Why there's no price: `stale_quote` (the quote's more than 15 seconds old), `market_closed` (outside the contract's trading hours, or it's expired), `one_sided` (live, but no bid or no ask, so no mid to mark at), `no_quote` (no quote right now), `contract_not_found`."
+            "description": "Why there's no price: `stale_quote` (the quote's more than 15 seconds old), `market_closed` (outside the contract's trading hours, or it's expired), `one_sided` (live, but no bid or no ask, so no mid to mark at), `no_quote` (no quote right now), `contract_not_found`, `not_marked` (this page holds open trades on more than 25 expirations, so ask for fewer with `limit`)."
           },
           "price": {
             "type": "number",
