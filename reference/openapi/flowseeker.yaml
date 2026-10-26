@@ -55,8 +55,8 @@ info:
 
     | Tier | Credits | Routes |
     |------|--------:|--------|
-    | Light | 1 | single-key reads, ratios, scores, discovery/search lists, expirations, rvol, per-contract bull/bear, the flow feed |
-    | Medium | 3 | charts, full chains, by-strike matrix, momentum/baseline/strikes, tide, aggregate, sweeps, market, sector, market-breadth, chain bull/bear, unusual-volume/oi screeners, dark-pool top-prints |
+    | Light | 1 | single-key reads, ratios, scores, discovery/search lists, expirations, rvol, per-contract bull/bear, the flow feed, insider and congressional filings (per ticker and the latest feeds) |
+    | Medium | 3 | charts, full chains, by-strike matrix, momentum/baseline/strikes, tide, aggregate, sweeps, market, sector, market-breadth, chain bull/bear, unusual-volume/oi screeners, dark-pool top-prints, insider and congressional top-names |
     | Heavy | 5 | trade feeds (`/trades`, dark-pool trades), history (`/history`, `historical-compare`), bulk endpoints |
 
     **Range-priced routes.** Where the range you ask for drives the work, the
@@ -165,8 +165,23 @@ tags:
       raw enriched trades, and historical rollups.
   - name: Dark Pool
     description: |
-      Off-exchange (TRF) prints — paginated dark-pool trades and the
-      largest individual prints per ticker. No side / BBO / greeks.
+      Off-exchange (TRF) prints — paginated dark-pool trades, the largest
+      individual prints per ticker, price levels and daily totals — plus
+      FINRA's daily short-sale volume and bi-monthly short interest. No
+      side / BBO / greeks.
+  - name: Insider
+    description: |
+      SEC Form 4 insider transactions (officers, directors, 10% owners):
+      one ticker's filings with an open-market summary, the latest filings
+      across tickers, and tickers ranked by distinct insiders buying or
+      selling. Coverage starts 2003; filings land once a weekday.
+  - name: Congress
+    description: |
+      STOCK Act periodic transaction reports from members of the House and
+      Senate: one ticker's disclosures, the latest disclosures, and tickers
+      ranked by distinct members trading them. Amounts are the filed dollar
+      brackets, never point values. Windows are on the disclosure date (when
+      a trade became public). Coverage starts August 2024.
   - name: Meta
     description: API metadata (this OpenAPI document, etc.).
 
@@ -3124,7 +3139,9 @@ paths:
         Off-exchange shares and notional traded at each price bucket for
         `{ticker}` over a window, largest first. Levels where dark-pool volume
         concentrated are commonly read as support and resistance. Defaults to
-        the last 30 calendar days and a bucket near 0.1% of the window's VWAP.
+        the last 30 calendar days and a bucket near 0.1% of the latest price.
+        Finished days are cached; today's prints refresh within about 90
+        seconds. `mode=peaks` keeps one level per cluster of adjacent buckets.
       parameters:
         - $ref: "#/components/parameters/Ticker"
         - name: date_start
@@ -3145,13 +3162,26 @@ paths:
         - name: bucket
           in: query
           required: false
-          description: Price bucket width in USD. Omit for automatic (a power of ten near 0.1% of VWAP).
+          description: |
+            Price bucket width in USD: 0.01, 0.02, 0.05, 0.10, 0.25, 0.50, 1,
+            2.50, 5, 10 or 25. Other values snap to the nearest supported
+            width and add a `BUCKET_ADJUSTED` warning to `meta.warnings`. Omit
+            for automatic (a power of ten near 0.1% of the latest price).
           schema: { type: number, format: double, minimum: 0.01, example: 0.5 }
         - name: sort
           in: query
           required: false
           description: Ranking of the returned levels, largest first.
           schema: { type: string, enum: [notional, shares, prints, block_notional], default: notional }
+        - name: mode
+          in: query
+          required: false
+          description: |
+            `all` returns every bucket. `peaks` returns only buckets at least as
+            heavy (by notional) as the one below and heavier than the one above,
+            so a cluster of adjacent buckets yields one level. Totals in `meta`
+            always cover every bucket.
+          schema: { type: string, enum: [all, peaks], default: all }
         - name: limit
           in: query
           required: false
@@ -3183,6 +3213,13 @@ paths:
         ticker, one row per ticker per day (`group_by=day`) or summed over the
         range (`group_by=ticker`). Without `tickers` it ranks every name.
         Defaults to today (ET); ranges up to 366 days.
+
+        Each row also carries FINRA's Reg SHO short volume for the same ticker
+        and days: short-sale volume over all off-exchange volume FINRA
+        reported, not only the prints counted here. FINRA posts each day
+        around 6 PM ET, so today's FINRA fields are `null` until then. If FINRA
+        data can't be read the totals are still returned, the FINRA fields are
+        `null`, and `meta.warnings` has `FINRA_UNAVAILABLE`.
       parameters:
         - name: date
           in: query
@@ -3254,6 +3291,462 @@ paths:
         "401": { $ref: "#/components/responses/Unauthorized" }
         "403": { $ref: "#/components/responses/Forbidden" }
         "404": { $ref: "#/components/responses/NotFound" }
+        "402": { $ref: "#/components/responses/InsufficientCredits" }
+        "429": { $ref: "#/components/responses/RateLimited" }
+        "500": { $ref: "#/components/responses/InternalError" }
+        "503": { $ref: "#/components/responses/Unavailable" }
+        "504": { $ref: "#/components/responses/GatewayTimeout" }
+
+  /v1/dark-pool/short-interest:
+    get:
+      summary: Short interest across symbols for one settlement date
+      operationId: getShortInterest
+      x-credits: 3
+      tags: [Dark Pool]
+      description: |
+        FINRA's consolidated short interest for every exchange-listed symbol on
+        one settlement date, ranked. Reports settle mid-month and at month end
+        and FINRA publishes them about a week later; data starts 2021-10-29.
+        Without `settlement_date` it serves the latest report.
+      parameters:
+        - name: settlement_date
+          in: query
+          required: false
+          description: |
+            Settlement date (`YYYY-MM-DD`). Any date works: the latest report
+            settled on or before it is served, and `meta.settlementDate` says which.
+          schema: { type: string, format: date }
+        - name: tickers
+          in: query
+          required: false
+          description: Comma-separated tickers (max 50). Omit for every symbol.
+          schema: { type: string, example: "GME,AMC" }
+        - name: min_avg_daily_volume
+          in: query
+          required: false
+          description: Minimum FINRA average daily volume (shares), to drop illiquid names from a days-to-cover ranking.
+          schema: { type: integer, minimum: 0, default: 0 }
+        - name: sort
+          in: query
+          required: false
+          schema: { type: string, enum: [shares_short, days_to_cover, change, change_pct], default: shares_short }
+        - name: order
+          in: query
+          required: false
+          schema: { type: string, enum: [asc, desc], default: desc }
+        - name: limit
+          in: query
+          required: false
+          schema: { type: integer, default: 500, minimum: 1, maximum: 5000 }
+        - name: offset
+          in: query
+          required: false
+          schema: { type: integer, default: 0, minimum: 0, maximum: 100000 }
+      responses:
+        "200":
+          description: Short interest for one settlement date, ranked.
+          content:
+            application/json:
+              schema: { $ref: "#/components/schemas/ShortInterestSuccess" }
+        "400": { $ref: "#/components/responses/BadRequest" }
+        "401": { $ref: "#/components/responses/Unauthorized" }
+        "403": { $ref: "#/components/responses/Forbidden" }
+        "404": { $ref: "#/components/responses/NotFound" }
+        "402": { $ref: "#/components/responses/InsufficientCredits" }
+        "429": { $ref: "#/components/responses/RateLimited" }
+        "500": { $ref: "#/components/responses/InternalError" }
+        "503": { $ref: "#/components/responses/Unavailable" }
+        "504": { $ref: "#/components/responses/GatewayTimeout" }
+
+  /v1/dark-pool/short-interest/{ticker}:
+    get:
+      summary: One ticker's FINRA short interest reports
+      operationId: getShortInterestHistory
+      x-credits: 1
+      tags: [Dark Pool]
+      description: |
+        Every FINRA consolidated short interest report for `{ticker}` settled
+        in the window, oldest first. Defaults to the last 365 days; windows up
+        to 1830 days (data starts 2021-10-29).
+      parameters:
+        - $ref: "#/components/parameters/Ticker"
+        - name: date_start
+          in: query
+          required: false
+          description: Inclusive start (`YYYY-MM-DD`). Replaces `lookback_days`. Max span 1830 days.
+          schema: { type: string, format: date }
+        - name: date_end
+          in: query
+          required: false
+          description: Inclusive end (`YYYY-MM-DD`). Defaults to today (ET).
+          schema: { type: string, format: date }
+        - name: lookback_days
+          in: query
+          required: false
+          description: Calendar days back from `date_end`.
+          schema: { type: integer, default: 365, minimum: 1, maximum: 1830 }
+      responses:
+        "200":
+          description: Short interest reports for `{ticker}`, oldest first.
+          content:
+            application/json:
+              schema: { $ref: "#/components/schemas/ShortInterestHistorySuccess" }
+        "400": { $ref: "#/components/responses/BadRequest" }
+        "401": { $ref: "#/components/responses/Unauthorized" }
+        "403": { $ref: "#/components/responses/Forbidden" }
+        "404": { $ref: "#/components/responses/NotFound" }
+        "402": { $ref: "#/components/responses/InsufficientCredits" }
+        "429": { $ref: "#/components/responses/RateLimited" }
+        "500": { $ref: "#/components/responses/InternalError" }
+        "503": { $ref: "#/components/responses/Unavailable" }
+        "504": { $ref: "#/components/responses/GatewayTimeout" }
+
+  /v1/underlying/{ticker}/insider:
+    get:
+      summary: One ticker's insider (Form 4) activity
+      operationId: getUnderlyingInsider
+      x-credits: 1
+      tags: [Insider]
+      description: |
+        SEC Form 4 lines for `{ticker}` in the window, newest transaction
+        first, with an open-market summary and a monthly series. The summary
+        and `monthly` cover the whole window whatever `limit`, `offset` and
+        `action` are; only open-market buys and sells (codes P and S) count
+        toward them, since grants, exercises and tax withholding are
+        compensation rather than a view. Windows are on the TRANSACTION date;
+        defaults to the last 365 days, up to 3660 days (data starts 2003).
+        Share classes accept `BRK.B`, `BRK-B` or `BRKB`.
+      parameters:
+        - $ref: "#/components/parameters/Ticker"
+        - name: date_start
+          in: query
+          required: false
+          description: Inclusive start on the transaction date (`YYYY-MM-DD`). Defaults to 365 days before `date_end`.
+          schema: { type: string, format: date }
+        - name: date_end
+          in: query
+          required: false
+          description: Inclusive end (`YYYY-MM-DD`). Defaults to today (ET).
+          schema: { type: string, format: date }
+        - name: action
+          in: query
+          required: false
+          description: Filters `trades` only. `open_market` keeps buys and sells (codes P and S).
+          schema: { type: string, enum: [all, open_market, buy, sell], default: all }
+        - name: limit
+          in: query
+          required: false
+          schema: { type: integer, default: 250, minimum: 1, maximum: 2000 }
+        - name: offset
+          in: query
+          required: false
+          schema: { type: integer, default: 0, minimum: 0, maximum: 10000 }
+      responses:
+        "200":
+          description: Summary, monthly series and filing lines for `{ticker}`.
+          content:
+            application/json:
+              schema: { $ref: "#/components/schemas/InsiderTickerSuccess" }
+        "400": { $ref: "#/components/responses/BadRequest" }
+        "401": { $ref: "#/components/responses/Unauthorized" }
+        "403": { $ref: "#/components/responses/Forbidden" }
+        "404": { $ref: "#/components/responses/NotFound" }
+        "402": { $ref: "#/components/responses/InsufficientCredits" }
+        "429": { $ref: "#/components/responses/RateLimited" }
+        "500": { $ref: "#/components/responses/InternalError" }
+        "503": { $ref: "#/components/responses/Unavailable" }
+        "504": { $ref: "#/components/responses/GatewayTimeout" }
+
+  /v1/insider/latest:
+    get:
+      summary: Latest insider filings across tickers
+      operationId: getInsiderLatest
+      x-credits: 1
+      tags: [Insider]
+      description: |
+        Form 4 lines filed in the window across every ticker, newest filing
+        first. Defaults to open-market buys and sells over the last 7 days;
+        windows are on the FILING date (when the trade became public) and
+        span at most 31 days. Page with `offset`.
+      parameters:
+        - name: date_start
+          in: query
+          required: false
+          description: Inclusive start on the filing date (`YYYY-MM-DD`). Defaults to 7 days before `date_end`. Max span 31 days.
+          schema: { type: string, format: date }
+        - name: date_end
+          in: query
+          required: false
+          description: Inclusive end (`YYYY-MM-DD`). Defaults to today (ET).
+          schema: { type: string, format: date }
+        - name: tickers
+          in: query
+          required: false
+          description: Comma-separated tickers (max 50). Omit for every ticker.
+          schema: { type: string, example: "NVDA,TSLA" }
+        - name: action
+          in: query
+          required: false
+          schema: { type: string, enum: [open_market, buy, sell, all], default: open_market }
+        - name: role
+          in: query
+          required: false
+          description: Only filers claiming this role. A filer can hold several.
+          schema: { type: string, enum: [officer, director, ten_percent_owner] }
+        - name: min_value
+          in: query
+          required: false
+          description: Minimum line value (USD, `shares × price`). Lines without a price are dropped.
+          schema: { type: number, minimum: 0 }
+        - name: limit
+          in: query
+          required: false
+          schema: { type: integer, default: 100, minimum: 1, maximum: 1000 }
+        - name: offset
+          in: query
+          required: false
+          schema: { type: integer, default: 0, minimum: 0, maximum: 10000 }
+      responses:
+        "200":
+          description: Filing lines, newest filing first.
+          content:
+            application/json:
+              schema: { $ref: "#/components/schemas/InsiderFeedSuccess" }
+        "400": { $ref: "#/components/responses/BadRequest" }
+        "401": { $ref: "#/components/responses/Unauthorized" }
+        "403": { $ref: "#/components/responses/Forbidden" }
+        "404": { $ref: "#/components/responses/NotFound" }
+        "402": { $ref: "#/components/responses/InsufficientCredits" }
+        "429": { $ref: "#/components/responses/RateLimited" }
+        "500": { $ref: "#/components/responses/InternalError" }
+        "503": { $ref: "#/components/responses/Unavailable" }
+        "504": { $ref: "#/components/responses/GatewayTimeout" }
+
+  /v1/insider/top-names:
+    get:
+      summary: Tickers ranked by insider buying or selling
+      operationId: getInsiderTopNames
+      x-credits: 3
+      tags: [Insider]
+      description: |
+        Tickers ranked by how many DISTINCT insiders bought (or sold) in the
+        open market in the window — several insiders buying the same name
+        ("cluster buying") is the pattern this data is read for. One insider
+        filing a position in several lines counts once. Windows are on the
+        filing date, default the last 30 days, and span at most 92 days.
+        `meta.totalNames` is the number of tickers meeting the filter before
+        `limit`.
+      parameters:
+        - name: date_start
+          in: query
+          required: false
+          description: Inclusive start on the filing date (`YYYY-MM-DD`). Defaults to 30 days before `date_end`. Max span 92 days.
+          schema: { type: string, format: date }
+        - name: date_end
+          in: query
+          required: false
+          description: Inclusive end (`YYYY-MM-DD`). Defaults to today (ET).
+          schema: { type: string, format: date }
+        - name: side
+          in: query
+          required: false
+          schema: { type: string, enum: [buy, sell], default: buy }
+        - name: sort
+          in: query
+          required: false
+          description: "`insiders` ranks by distinct insiders on `side`, `value` by USD on `side`."
+          schema: { type: string, enum: [insiders, value], default: insiders }
+        - name: role
+          in: query
+          required: false
+          description: Only count filers claiming this role.
+          schema: { type: string, enum: [officer, director, ten_percent_owner] }
+        - name: min_insiders
+          in: query
+          required: false
+          description: Drop tickers with fewer distinct insiders on `side`.
+          schema: { type: integer, default: 1, minimum: 1 }
+        - name: limit
+          in: query
+          required: false
+          schema: { type: integer, default: 50, minimum: 1, maximum: 500 }
+      responses:
+        "200":
+          description: Tickers ranked by open-market insider activity.
+          content:
+            application/json:
+              schema: { $ref: "#/components/schemas/InsiderTopNamesSuccess" }
+        "400": { $ref: "#/components/responses/BadRequest" }
+        "401": { $ref: "#/components/responses/Unauthorized" }
+        "403": { $ref: "#/components/responses/Forbidden" }
+        "402": { $ref: "#/components/responses/InsufficientCredits" }
+        "429": { $ref: "#/components/responses/RateLimited" }
+        "500": { $ref: "#/components/responses/InternalError" }
+        "503": { $ref: "#/components/responses/Unavailable" }
+        "504": { $ref: "#/components/responses/GatewayTimeout" }
+
+  /v1/underlying/{ticker}/congress:
+    get:
+      summary: One ticker's congressional trading disclosures
+      operationId: getUnderlyingCongress
+      x-credits: 1
+      tags: [Congress]
+      description: |
+        STOCK Act periodic transaction reports naming `{ticker}`, newest
+        disclosure first, with a summary over the whole window. Amounts are
+        the filed brackets, so the summary carries the sum of bracket floors
+        and ceilings per side and no net. Windows are on the DISCLOSURE date;
+        defaults to the last 730 days (data starts August 2024).
+      parameters:
+        - $ref: "#/components/parameters/Ticker"
+        - name: date_start
+          in: query
+          required: false
+          description: Inclusive start on the disclosure date (`YYYY-MM-DD`). Defaults to 730 days before `date_end`.
+          schema: { type: string, format: date }
+        - name: date_end
+          in: query
+          required: false
+          description: Inclusive end (`YYYY-MM-DD`). Defaults to today (ET).
+          schema: { type: string, format: date }
+        - name: limit
+          in: query
+          required: false
+          schema: { type: integer, default: 200, minimum: 1, maximum: 2000 }
+        - name: offset
+          in: query
+          required: false
+          schema: { type: integer, default: 0, minimum: 0, maximum: 10000 }
+      responses:
+        "200":
+          description: Summary and disclosure lines for `{ticker}`.
+          content:
+            application/json:
+              schema: { $ref: "#/components/schemas/CongressTickerSuccess" }
+        "400": { $ref: "#/components/responses/BadRequest" }
+        "401": { $ref: "#/components/responses/Unauthorized" }
+        "403": { $ref: "#/components/responses/Forbidden" }
+        "404": { $ref: "#/components/responses/NotFound" }
+        "402": { $ref: "#/components/responses/InsufficientCredits" }
+        "429": { $ref: "#/components/responses/RateLimited" }
+        "500": { $ref: "#/components/responses/InternalError" }
+        "503": { $ref: "#/components/responses/Unavailable" }
+        "504": { $ref: "#/components/responses/GatewayTimeout" }
+
+  /v1/congress/latest:
+    get:
+      summary: Latest congressional disclosures across tickers
+      operationId: getCongressLatest
+      x-credits: 1
+      tags: [Congress]
+      description: |
+        Disclosure lines across every ticker, newest disclosure first.
+        Defaults to the last 30 days; windows span at most 366 days. Filings
+        whose asset could not be matched to a ticker (bonds, private funds)
+        are not included.
+      parameters:
+        - name: date_start
+          in: query
+          required: false
+          description: Inclusive start on the disclosure date (`YYYY-MM-DD`). Defaults to 30 days before `date_end`. Max span 366 days.
+          schema: { type: string, format: date }
+        - name: date_end
+          in: query
+          required: false
+          description: Inclusive end (`YYYY-MM-DD`). Defaults to today (ET).
+          schema: { type: string, format: date }
+        - name: tickers
+          in: query
+          required: false
+          description: Comma-separated tickers (max 50). Omit for every ticker.
+          schema: { type: string, example: "NVDA,MSFT" }
+        - name: chamber
+          in: query
+          required: false
+          schema: { type: string, enum: [house, senate] }
+        - name: member
+          in: query
+          required: false
+          description: One member's Bioguide ID (as returned in `bioguideId`).
+          schema: { type: string, example: P000197 }
+        - name: action
+          in: query
+          required: false
+          schema: { type: string, enum: [all, buy, sell], default: all }
+        - name: min_amount
+          in: query
+          required: false
+          description: Minimum bracket floor (USD), e.g. `15001` drops the `$1,001 - $15,000` bracket.
+          schema: { type: number, minimum: 0 }
+        - name: limit
+          in: query
+          required: false
+          schema: { type: integer, default: 100, minimum: 1, maximum: 1000 }
+        - name: offset
+          in: query
+          required: false
+          schema: { type: integer, default: 0, minimum: 0, maximum: 10000 }
+      responses:
+        "200":
+          description: Disclosure lines, newest disclosure first.
+          content:
+            application/json:
+              schema: { $ref: "#/components/schemas/CongressFeedSuccess" }
+        "400": { $ref: "#/components/responses/BadRequest" }
+        "401": { $ref: "#/components/responses/Unauthorized" }
+        "403": { $ref: "#/components/responses/Forbidden" }
+        "404": { $ref: "#/components/responses/NotFound" }
+        "402": { $ref: "#/components/responses/InsufficientCredits" }
+        "429": { $ref: "#/components/responses/RateLimited" }
+        "500": { $ref: "#/components/responses/InternalError" }
+        "503": { $ref: "#/components/responses/Unavailable" }
+        "504": { $ref: "#/components/responses/GatewayTimeout" }
+
+  /v1/congress/top-names:
+    get:
+      summary: Tickers ranked by how many members of Congress traded them
+      operationId: getCongressTopNames
+      x-credits: 3
+      tags: [Congress]
+      description: |
+        Tickers ranked by DISTINCT members disclosing a buy (or sale) in the
+        window; one member filing several lines counts once. Windows are on
+        the disclosure date, default the last 30 days, and span at most 366
+        days. `meta.totalNames` is the number of tickers meeting the filter
+        before `limit`.
+      parameters:
+        - name: date_start
+          in: query
+          required: false
+          description: Inclusive start on the disclosure date (`YYYY-MM-DD`). Defaults to 30 days before `date_end`. Max span 366 days.
+          schema: { type: string, format: date }
+        - name: date_end
+          in: query
+          required: false
+          description: Inclusive end (`YYYY-MM-DD`). Defaults to today (ET).
+          schema: { type: string, format: date }
+        - name: side
+          in: query
+          required: false
+          schema: { type: string, enum: [buy, sell, all], default: buy }
+        - name: min_members
+          in: query
+          required: false
+          description: Drop tickers with fewer distinct members on `side`.
+          schema: { type: integer, default: 1, minimum: 1 }
+        - name: limit
+          in: query
+          required: false
+          schema: { type: integer, default: 50, minimum: 1, maximum: 500 }
+      responses:
+        "200":
+          description: Tickers ranked by distinct members.
+          content:
+            application/json:
+              schema: { $ref: "#/components/schemas/CongressTopNamesSuccess" }
+        "400": { $ref: "#/components/responses/BadRequest" }
+        "401": { $ref: "#/components/responses/Unauthorized" }
+        "403": { $ref: "#/components/responses/Forbidden" }
         "402": { $ref: "#/components/responses/InsufficientCredits" }
         "429": { $ref: "#/components/responses/RateLimited" }
         "500": { $ref: "#/components/responses/InternalError" }
@@ -3397,6 +3890,24 @@ components:
             `/v1/flow/{ticker}` only: the last row's exact time (RFC 3339 with
             nanoseconds), for `end_time` paging. Inclusive, so rows at that
             instant can repeat; `nextCursor` never repeats or skips.
+        warnings:
+          type: array
+          description: Present only when the answer was adjusted or is incomplete.
+          items:
+            type: object
+            required: [code, message]
+            properties:
+              code:
+                type: string
+                description: |
+                  Stable identifier, e.g. `BUCKET_ADJUSTED` (a requested bucket
+                  was snapped to a supported width) or `LEVELS_TRUNCATED` (the
+                  window had more buckets than one answer holds; use a wider
+                  bucket for complete totals).
+              message: { type: string }
+              affectedFields:
+                type: array
+                items: { type: string }
 
     Error:
       type: object
@@ -5787,9 +6298,14 @@ components:
     DarkPoolLevel:
       type: object
       description: Dark-pool volume in one price bucket over the window.
-      required: [price, prints, shares, notional, pctOfNotional, blockPrints, blockNotional]
+      required: [price, high, vwap, prints, shares, notional, pctOfNotional, blockPrints, blockNotional]
       properties:
         price: { type: number, format: double, description: Lower edge of the bucket (USD). }
+        high: { type: number, format: double, description: Upper edge of the bucket (USD, exclusive). }
+        vwap:
+          type: number
+          format: double
+          description: Volume-weighted price of the bucket's prints (USD), within `[price, high]`.
         prints: { type: integer, minimum: 0 }
         shares: { type: integer, minimum: 0 }
         notional: { type: number, format: double, description: Notional printed in the bucket (USD). }
@@ -5804,12 +6320,13 @@ components:
       allOf:
         - $ref: "#/components/schemas/Meta"
         - type: object
-          required: [ticker, dateStart, dateEnd, bucket, totalShares, totalNotional]
+          required: [ticker, dateStart, dateEnd, bucket, mode, totalShares, totalNotional]
           properties:
             ticker: { type: string }
             dateStart: { type: string, format: date }
             dateEnd: { type: string, format: date }
             bucket: { type: number, format: double, description: Bucket width applied (USD). }
+            mode: { type: string, enum: [all, peaks], description: The `mode` applied. }
             totalShares: { type: integer, minimum: 0, description: Window total across every level. }
             totalNotional: { type: number, format: double, description: Window total across every level (USD). }
 
@@ -5849,6 +6366,30 @@ components:
           description: |
             Average daily dark-pool shares as a percent of the ticker's average
             daily volume. `null` when no ADV is available.
+        shortVolume:
+          type: [number, "null"]
+          format: double
+          description: |
+            FINRA Reg SHO short-sale volume across off-exchange venues, summed
+            over the row's days FINRA has posted. `null` until FINRA posts.
+        shortExemptVolume:
+          type: [number, "null"]
+          format: double
+          description: Short-exempt part of `shortVolume`.
+        finraVolume:
+          type: [number, "null"]
+          format: double
+          description: All off-exchange volume FINRA reported for the same days.
+        shortVolumeRatio:
+          type: [number, "null"]
+          format: double
+          description: |
+            `shortVolume / finraVolume`, 0-1: the share of the day's
+            off-exchange volume that was short sales. Market makers filling
+            customer buys off-exchange report them as short sales, so a ratio
+            above the ticker's own norm leans to buying. This is not days to
+            cover (short interest / average volume), which some sites call the
+            short ratio; that is `daysToCover` on `/dark-pool/short-interest`.
 
     DarkPoolDailyMeta:
       allOf:
@@ -5872,6 +6413,373 @@ components:
           type: array
           items: { $ref: "#/components/schemas/DarkPoolDailyRow" }
         meta: { $ref: "#/components/schemas/DarkPoolDailyMeta" }
+
+    ShortInterestReport:
+      type: object
+      description: One FINRA consolidated short interest report for one symbol.
+      required:
+        [settlementDate, symbol, sharesShort, previousSharesShort, change, changePct, avgDailyVolume, daysToCover]
+      properties:
+        settlementDate:
+          type: string
+          format: date
+          description: Settlement date the short position is measured at.
+        symbol:
+          type: string
+          description: FINRA's symbol, without a share-class separator (`BRKB` for `BRK.B`).
+        sharesShort: { type: integer, minimum: 0, description: Shares held short and not yet covered. }
+        previousSharesShort: { type: integer, minimum: 0, description: "`sharesShort` in the previous report." }
+        change: { type: integer, description: "`sharesShort - previousSharesShort`." }
+        changePct:
+          type: [number, "null"]
+          format: double
+          description: Percent change from the previous report.
+        avgDailyVolume: { type: integer, minimum: 0, description: FINRA's average daily volume over the period (shares). }
+        daysToCover:
+          type: [number, "null"]
+          format: double
+          description: "`sharesShort / avgDailyVolume`."
+
+    ShortInterestHistoryMeta:
+      allOf:
+        - $ref: "#/components/schemas/Meta"
+        - type: object
+          required: [ticker, dateStart, dateEnd, count]
+          properties:
+            ticker: { type: string }
+            dateStart: { type: string, format: date }
+            dateEnd: { type: string, format: date }
+            count: { type: integer }
+
+    ShortInterestHistorySuccess:
+      type: object
+      required: [data, meta]
+      properties:
+        data:
+          type: array
+          items: { $ref: "#/components/schemas/ShortInterestReport" }
+        meta: { $ref: "#/components/schemas/ShortInterestHistoryMeta" }
+
+    ShortInterestMeta:
+      allOf:
+        - $ref: "#/components/schemas/Meta"
+        - type: object
+          required: [settlementDate, limit, offset, count, hasMore]
+          properties:
+            settlementDate:
+              type: [string, "null"]
+              format: date
+              description: The settlement date served; `null` when no report matched.
+            limit: { type: integer }
+            offset: { type: integer }
+            count: { type: integer }
+            hasMore: { type: boolean, description: "`true` when the page is full (`count == limit`)." }
+
+    ShortInterestSuccess:
+      type: object
+      required: [data, meta]
+      properties:
+        data:
+          type: array
+          items: { $ref: "#/components/schemas/ShortInterestReport" }
+        meta: { $ref: "#/components/schemas/ShortInterestMeta" }
+
+    InsiderTrade:
+      type: object
+      description: One SEC Form 4 line.
+      required:
+        [ticker, transactionDate, filingDate, filingLagDays, insiderName, insiderCik, role, isOfficer, isDirector,
+         isTenPercentOwner, transactionCode, action, isOpenMarket, shares, price, value, sharesAfter, pctOfPosition,
+         securityName, directOrIndirect, formType, filingUrl]
+      properties:
+        ticker: { type: string }
+        transactionDate: { type: string, format: date }
+        filingDate: { type: string, format: date, description: When the form reached EDGAR. }
+        filingLagDays: { type: integer, description: Days from the transaction to the filing. }
+        insiderName: { type: string, description: As filed, surname first. }
+        insiderCik: { type: string, description: The filer's SEC CIK. }
+        role: { type: string, description: "The role as filed, e.g. `officer: Chief Financial Officer`." }
+        isOfficer: { type: boolean }
+        isDirector: { type: boolean }
+        isTenPercentOwner: { type: boolean }
+        transactionCode: { type: string, description: "The SEC transaction code as filed, e.g. `P-Purchase`, `S-Sale`, `M-Exempt`." }
+        action:
+          type: string
+          enum: [BUY, SELL, GRANT, EXERCISE, TAX, TRANSFER, OTHER]
+          description: The reading of `transactionCode`.
+        isOpenMarket: { type: boolean, description: "`true` for open-market buys and sells (codes P and S)." }
+        shares: { type: number, format: double }
+        price:
+          type: [number, "null"]
+          format: double
+          description: Per-share price; `null` when none was filed (the norm for grants and vests).
+        value:
+          type: [number, "null"]
+          format: double
+          description: "`shares × price` (USD); `null` without a price."
+        sharesAfter: { type: number, format: double, description: Holding after the transaction, as filed. }
+        pctOfPosition:
+          type: [number, "null"]
+          format: double
+          description: Fraction (0-1) of the filer's position this line moved; `null` when the filing does not support it.
+        securityName: { type: string }
+        directOrIndirect: { type: string, description: "`D` direct, `I` indirect (a trust, a family member)." }
+        formType: { type: string, description: "`4`, or `4/A` for an amendment." }
+        filingUrl: { type: string, format: uri }
+
+    InsiderSummary:
+      type: object
+      description: Open-market activity over the whole window, independent of `limit`, `offset` and `action`.
+      required:
+        [buyCount, sellCount, buyShares, sellShares, buyValue, sellValue, netValue, distinctBuyers, distinctSellers, otherCount]
+      properties:
+        buyCount: { type: integer, minimum: 0 }
+        sellCount: { type: integer, minimum: 0 }
+        buyShares: { type: number, format: double }
+        sellShares: { type: number, format: double }
+        buyValue: { type: number, format: double, description: USD across buy lines that carried a price. }
+        sellValue: { type: number, format: double }
+        netValue: { type: number, format: double, description: "`buyValue - sellValue`." }
+        distinctBuyers: { type: integer, minimum: 0, description: Distinct filers, not lines. }
+        distinctSellers: { type: integer, minimum: 0 }
+        otherCount: { type: integer, minimum: 0, description: Lines that are not open-market (grants, exercises, tax withholding). }
+
+    InsiderMonth:
+      type: object
+      required: [month, buyValue, sellValue, buyCount, sellCount]
+      properties:
+        month: { type: string, description: "`YYYY-MM`." }
+        buyValue: { type: number, format: double }
+        sellValue: { type: number, format: double }
+        buyCount: { type: integer, minimum: 0 }
+        sellCount: { type: integer, minimum: 0 }
+
+    DisclosureTickerMeta:
+      allOf:
+        - $ref: "#/components/schemas/Meta"
+        - type: object
+          required: [ticker, dateStart, dateEnd, limit, offset, count, hasMore]
+          properties:
+            ticker: { type: string }
+            dateStart: { type: string, format: date }
+            dateEnd: { type: string, format: date }
+            limit: { type: integer }
+            offset: { type: integer }
+            count: { type: integer, description: Lines in `trades`. }
+            hasMore: { type: boolean, description: "`true` when `trades` is a full page (`count == limit`)." }
+
+    DisclosureFeedMeta:
+      allOf:
+        - $ref: "#/components/schemas/Meta"
+        - type: object
+          required: [dateStart, dateEnd, limit, offset, count, hasMore]
+          properties:
+            dateStart: { type: string, format: date }
+            dateEnd: { type: string, format: date }
+            limit: { type: integer }
+            offset: { type: integer }
+            count: { type: integer }
+            hasMore: { type: boolean, description: "`true` when the page is full (`count == limit`)." }
+
+    InsiderTickerSuccess:
+      type: object
+      required: [data, meta]
+      properties:
+        data:
+          type: object
+          required: [summary, monthly, trades]
+          properties:
+            summary: { $ref: "#/components/schemas/InsiderSummary" }
+            monthly:
+              type: array
+              description: Open-market totals per calendar month, oldest first, zeros included.
+              items: { $ref: "#/components/schemas/InsiderMonth" }
+            trades:
+              type: array
+              description: Filing lines, newest transaction first.
+              items: { $ref: "#/components/schemas/InsiderTrade" }
+        meta: { $ref: "#/components/schemas/DisclosureTickerMeta" }
+
+    InsiderFeedSuccess:
+      type: object
+      required: [data, meta]
+      properties:
+        data:
+          type: array
+          items: { $ref: "#/components/schemas/InsiderTrade" }
+        meta: { $ref: "#/components/schemas/DisclosureFeedMeta" }
+
+    InsiderTopName:
+      type: object
+      description: One ticker's open-market insider activity across the window.
+      required:
+        [ticker, distinctBuyers, distinctSellers, buyCount, sellCount, buyValue, sellValue, netValue, insiders,
+         firstFiling, lastFiling]
+      properties:
+        ticker: { type: string }
+        distinctBuyers: { type: integer, minimum: 0 }
+        distinctSellers: { type: integer, minimum: 0 }
+        buyCount: { type: integer, minimum: 0 }
+        sellCount: { type: integer, minimum: 0 }
+        buyValue: { type: number, format: double, description: USD across buy lines that carried a price. }
+        sellValue: { type: number, format: double }
+        netValue: { type: number, format: double, description: "`buyValue - sellValue`." }
+        insiders:
+          type: array
+          description: Filers on the ranked side, alphabetically, at most 12.
+          items: { type: string }
+        firstFiling: { type: string, format: date }
+        lastFiling: { type: string, format: date }
+
+    InsiderTopNamesSuccess:
+      type: object
+      required: [data, meta]
+      properties:
+        data:
+          type: array
+          items: { $ref: "#/components/schemas/InsiderTopName" }
+        meta:
+          allOf:
+            - $ref: "#/components/schemas/Meta"
+            - type: object
+              required: [dateStart, dateEnd, side, sort, totalNames, count]
+              properties:
+                dateStart: { type: string, format: date }
+                dateEnd: { type: string, format: date }
+                side: { type: string, enum: [buy, sell] }
+                sort: { type: string, enum: [insiders, value] }
+                totalNames: { type: integer, description: Tickers meeting the filter before `limit`. }
+                count: { type: integer }
+
+    CongressTrade:
+      type: object
+      description: One line of a STOCK Act periodic transaction report.
+      required:
+        [ticker, disclosureDate, transactionDate, disclosureLagDays, chamber, member, bioguideId, district, owner,
+         ownerIsMember, transactionType, action, assetDescription, assetType, amountRange, amountLow, amountHigh,
+         capitalGainsOver200, filingUrl]
+      properties:
+        ticker: { type: string }
+        disclosureDate: { type: string, format: date, description: When the report was filed and became public. }
+        transactionDate: { type: string, format: date }
+        disclosureLagDays:
+          type: [integer, "null"]
+          description: Days from the transaction to the disclosure; `null` if a date was unreadable.
+        chamber: { type: string, enum: [HOUSE, SENATE] }
+        member: { type: string, description: Display name, first then last. }
+        bioguideId: { type: string, description: "Congressional Bioguide ID, e.g. `P000197`. Stable where name spellings are not." }
+        district: { type: string, description: "`CA11` for a representative, the state for a senator." }
+        owner: { type: string, description: "`Self`, `Spouse`, `Joint`, `Dependent`, or blank." }
+        ownerIsMember: { type: boolean, description: "`true` for the member's own account (blank counts as the member)." }
+        transactionType: { type: string, description: "As filed: `Purchase`, `Sale`, `Sale (Partial)`, `Exchange`, ..." }
+        action: { type: string, enum: [BUY, SELL, EXCHANGE, OTHER] }
+        assetDescription: { type: string }
+        assetType: { type: string, description: "`Stock`, `Stock Option`, `ETF`, ..." }
+        amountRange: { type: string, description: "The bracket as filed, e.g. `$1,001 - $15,000`." }
+        amountLow: { type: number, format: double, description: Bracket floor (USD). }
+        amountHigh:
+          type: [number, "null"]
+          format: double
+          description: Bracket ceiling (USD); `null` for the open-ended top bracket.
+        capitalGainsOver200: { type: boolean, description: House only; always `false` for the Senate. }
+        filingUrl: { type: string, format: uri }
+
+    CongressSummary:
+      type: object
+      description: |
+        The window's disclosures, independent of `limit` and `offset`. Dollar
+        figures are sums of bracket bounds, never amounts, so there is no net.
+      required:
+        [buyCount, sellCount, buyLow, buyHigh, buyHighIsFloor, sellLow, sellHigh, sellHighIsFloor, distinctBuyers,
+         distinctSellers, distinctMembers, otherCount, hasHouse, hasSenate]
+      properties:
+        buyCount: { type: integer, minimum: 0 }
+        sellCount: { type: integer, minimum: 0 }
+        buyLow: { type: number, format: double, description: Sum of buy bracket floors. }
+        buyHigh: { type: number, format: double, description: Sum of buy bracket ceilings. }
+        buyHighIsFloor: { type: boolean, description: "A buy sat in the open-ended top bracket, so `buyHigh` is itself only a floor." }
+        sellLow: { type: number, format: double }
+        sellHigh: { type: number, format: double }
+        sellHighIsFloor: { type: boolean }
+        distinctBuyers: { type: integer, minimum: 0, description: Distinct members, not lines. }
+        distinctSellers: { type: integer, minimum: 0 }
+        distinctMembers: { type: integer, minimum: 0 }
+        otherCount: { type: integer, minimum: 0, description: Lines that are neither a buy nor a sale (exchanges). }
+        hasHouse: { type: boolean }
+        hasSenate: { type: boolean }
+
+    CongressTickerSuccess:
+      type: object
+      required: [data, meta]
+      properties:
+        data:
+          type: object
+          required: [summary, trades]
+          properties:
+            summary: { $ref: "#/components/schemas/CongressSummary" }
+            trades:
+              type: array
+              description: Disclosure lines, newest disclosure first.
+              items: { $ref: "#/components/schemas/CongressTrade" }
+        meta: { $ref: "#/components/schemas/DisclosureTickerMeta" }
+
+    CongressFeedSuccess:
+      type: object
+      required: [data, meta]
+      properties:
+        data:
+          type: array
+          items: { $ref: "#/components/schemas/CongressTrade" }
+        meta: { $ref: "#/components/schemas/DisclosureFeedMeta" }
+
+    CongressTopName:
+      type: object
+      description: One ticker's congressional activity across the window.
+      required:
+        [ticker, distinctBuyers, distinctSellers, distinctMembers, buyCount, sellCount, buyLow, buyHigh, buyHighIsFloor,
+         sellLow, sellHigh, sellHighIsFloor, otherCount, hasHouse, hasSenate, members, firstDisclosure, lastDisclosure]
+      properties:
+        ticker: { type: string }
+        distinctBuyers: { type: integer, minimum: 0 }
+        distinctSellers: { type: integer, minimum: 0 }
+        distinctMembers: { type: integer, minimum: 0 }
+        buyCount: { type: integer, minimum: 0 }
+        sellCount: { type: integer, minimum: 0 }
+        buyLow: { type: number, format: double }
+        buyHigh: { type: number, format: double }
+        buyHighIsFloor: { type: boolean }
+        sellLow: { type: number, format: double }
+        sellHigh: { type: number, format: double }
+        sellHighIsFloor: { type: boolean }
+        otherCount: { type: integer, minimum: 0 }
+        hasHouse: { type: boolean }
+        hasSenate: { type: boolean }
+        members:
+          type: array
+          description: Members on the ranked side, alphabetically, at most 12.
+          items: { type: string }
+        firstDisclosure: { type: string, format: date }
+        lastDisclosure: { type: string, format: date }
+
+    CongressTopNamesSuccess:
+      type: object
+      required: [data, meta]
+      properties:
+        data:
+          type: array
+          items: { $ref: "#/components/schemas/CongressTopName" }
+        meta:
+          allOf:
+            - $ref: "#/components/schemas/Meta"
+            - type: object
+              required: [dateStart, dateEnd, side, rankedBy, totalNames, count]
+              properties:
+                dateStart: { type: string, format: date }
+                dateEnd: { type: string, format: date }
+                side: { type: string, enum: [buy, sell, all] }
+                rankedBy: { type: string, description: "What the ranking counts, e.g. `distinct members buying`." }
+                totalNames: { type: integer, description: Tickers meeting the filter before `limit`. }
+                count: { type: integer }
 
   responses:
     BadRequest:

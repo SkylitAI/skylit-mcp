@@ -87,8 +87,60 @@ info:
     **Compression.** Send `Accept-Encoding: gzip` and JSON responses come back
     gzip-compressed (typically 3-5x smaller). Streams are never compressed.
 
-    **Velocity is live-only.** The `velocityPct` field is present on
-    `/v1/heatmap` (live) and absent on `/v1/historical` (replay).
+    **Velocity.** Velocity is how fast gamma/vanna exposure is changing, per
+    node (strike x expiration), over seven lookbacks: `1m`, `5m`, `10m`,
+    `15m`, `1h`, `4h`, `1d`. It is what the app's velocity badges, popover and
+    halo show. Where to get it:
+
+    | Where | What |
+    |---|---|
+    | `/v1/stream` `velocity` event | The app's live movers for every lookback, the halo and the anchors, every ~3 s. |
+    | `/v1/heatmap?velocity=nodes` | Per-node velocity for any expiration, plus movers and halo (optionally ranked over all or the requested expirations). |
+    | `velocityPctSigned` / `velocityPctMagnitude` on `/v1/heatmap` strikes | A per-strike net change over 5 minutes (a different, simpler metric). |
+
+    Definitions:
+    - **Percent** is the change in magnitude, `(|now| - |then|) / |then| x 100`,
+      so exposure growing in either sign is positive. It is undefined (the
+      timeframe is absent) when the node had no value then.
+    - **Lookback anchors.** Skylit stores a snapshot every 30 s. Timeframe L
+      compares against the stored snapshot nearest `now - L` (within 15 s;
+      if that one is missing, the next older ones up to 90 s back). Each
+      response names the anchor it used (`lookbacks`: the snapshot's build
+      time `ts` in Unix ms and its 30 s `bucket`). A timeframe missing from
+      `lookbacks` had no snapshot: its movers are empty and its per-node
+      values are absent (unknown), not zero.
+    - **1d** is the change **since the most recent regular options-session
+      close**: 16:00 ET, 16:15 ET for index options and late-closing ETFs
+      (SPY, QQQ, IWM, ...), 13:00/13:15 ET on early-close days, skipping
+      weekends and NYSE holidays. Its anchor is the snapshot of the final 30 s
+      before that close. During a session that is the previous session's
+      close; after a close (indexes keep updating overnight) it is that day's
+      close. Older servers used a wall-clock 24 h, which meant "since Friday"
+      on Mondays; the anchor's `ts` tells you which rule applied.
+    - **Equities** have no velocity outside their session, and during the
+      session a lookback is available only once its anchor is inside that
+      session (no `10m` before 09:40). At an equity's close the last frame is
+      held until the next open with `final: true`.
+    - **Movers** are the top 10 risers (magnitude growing) and top 10 fallers
+      per timeframe among nodes that moved at least 0.5%, ranked by size of
+      change. By default they rank over the **nearest 5 expirations** (the
+      app's view); per-node velocity exists for every expiration Skylit
+      stores (`expirations`).
+    - **Strike window.** Velocity covers the symbol's display window of
+      strikes around spot (92 by default), re-centred on spot every second.
+      On a trending day a strike can enter the window after a lookback's
+      snapshot was taken; it then has no value for that lookback.
+    - **Halo** is one character per strike per timeframe (`+` growing, `-`
+      shrinking, `0` flat within 0.5%): `front` for the nearest expiration,
+      `net` for the sum across the ranked expirations (only expirations the
+      lookback also covered).
+
+    **`velocityPct` is deprecated** in favour of two explicit fields with the
+    same inputs (the strike's net value now vs the board 5 minutes earlier):
+    `velocityPctSigned` (identical to `velocityPct`, `(v - pv) / |pv|`) and
+    `velocityPctMagnitude` (`(|v| - |pv|) / |pv|`, the app's metric: negative
+    exposure growing reads +50%, not -50%). `velocityPct` is kept unchanged.
+    All three are live-only.
 
     **Response shape.** Success → `{ "data": ..., "meta": { ... } }`; errors →
     `{ "error": { "code": "...", "message": "..." } }`, including the ones
@@ -130,8 +182,10 @@ paths:
       tags: [Heatmap]
       description: |
         Current per-strike heatmap for one or more symbols at the latest
-        snapshot. Includes the live `velocityPct` per strike. Pass multiple
-        comma-separated symbols for a single cross-asset call (the app's
+        snapshot. Includes the live per-strike `velocityPctSigned` and
+        `velocityPctMagnitude` (and the deprecated `velocityPct`), and with
+        `velocity=nodes` the per-node velocity block (see *Velocity* above).
+        Pass multiple comma-separated symbols for a single cross-asset call (the app's
         Trinity is `SPXW,SPY,QQQ`; `SPX` is the monthlies only), and
         `expirations` to net each strike over specific expiration dates instead
         of the nearest `maxExpirations`. A call that cannot finish within 20
@@ -145,6 +199,18 @@ paths:
         - $ref: "#/components/parameters/IncludeEmpty"
         - $ref: "#/components/parameters/Expirations"
         - $ref: "#/components/parameters/Layout"
+        - name: velocity
+          in: query
+          required: false
+          description: |
+            `nodes` adds `velocity` to each symbol: per-node velocity (every
+            timeframe) for every returned strike x expiration, including
+            expirations beyond the nearest 5, plus movers and halo. Read from
+            Skylit's 30 s velocity grid, so `velocity.asOf` can trail the
+            board's `asOf` by up to ~30 s; `velocity.stale` is true when no
+            grid exists for the symbol. Values have float32 precision.
+          schema: { type: string, enum: [nodes] }
+        - $ref: "#/components/parameters/VelocityRank"
       responses:
         "200":
           description: Live heatmap snapshot(s).
@@ -181,9 +247,9 @@ paths:
                           priceChangePercent: 0.36
                           expirations: ["2026-05-22", "2026-05-23", "2026-05-30"]
                           strikes:
-                            - { strike: 590, value: 1894300.4, nodeType: king, velocityPct: 12.4 }
-                            - { strike: 595, value: 642100.2, nodeType: gatekeeper, velocityPct: -3.1 }
-                            - { strike: 585, value: 88010.0, nodeType: normal, velocityPct: 0.4 }
+                            - { strike: 590, value: 1894300.4, nodeType: king, velocityPct: 12.4, velocityPctSigned: 12.4, velocityPctMagnitude: 12.4 }
+                            - { strike: 595, value: 642100.2, nodeType: gatekeeper, velocityPct: -3.1, velocityPctSigned: -3.1, velocityPctMagnitude: -3.1 }
+                            - { strike: 585, value: -88010.0, nodeType: normal, velocityPct: -0.4, velocityPctSigned: -0.4, velocityPctMagnitude: 0.4 }
                     meta: { metric: gamma, resolution: "1s", mode: live, cached: false }
                 singleExpiration:
                   summary: SPY netted over one expiration (`expirations=2026-05-23`)
@@ -218,7 +284,7 @@ paths:
       tags: [Heatmap]
       description: |
         The latest snapshot at or before `at` for one or more symbols — same
-        shape as `/v1/heatmap` minus `velocityPct` (velocity is live-only),
+        shape as `/v1/heatmap` minus the per-strike `velocityPct*` fields,
         including `layout=matrix` for the per-expiration grid. Precision is
         1 second where 1-second history exists for that day and 1 minute
         otherwise; `meta.resolution` says which. `at` may go back to
@@ -406,7 +472,7 @@ paths:
         | `connected` | — | `{format:"v2", symbols, metric, creditsRemaining, creditsPerMinute, maxDurationSeconds}` |
         | `resumed` | yes | Only when `Last-Event-ID` was sent. See *Resume*. |
         | `snapshot` | yes | `StreamSnapshot` (= `SymbolHeatmap` + `lagged`). Once per symbol on connect, then on every board change. |
-        | `velocity` | yes | `StreamVelocity`: per-node velocity for the stream's `metric`, when it changes (checked every ~3s). |
+        | `velocity` | yes | `StreamVelocity`: the app's velocity movers for the stream's `metric` in every timeframe (`movers`), the halo and the lookback anchors, when it changes (checked every ~3s, aligned with the publisher). An empty frame (`stale: true` when nothing is published, e.g. an equity outside its session) replaces the previous one, so movers never linger. |
         | `symbol_unavailable` | — | `{symbol, reason: "no_live_board" \| "expiration_not_found", message}`; a `snapshot` follows once a board exists. |
         | `credits` | — | `{remaining, charged}` after each per-minute debit. |
         | `closed` | — | `{reason: "insufficient_credits" \| "account_suspended" \| "key_revoked" \| "monthly_cap_reached" \| "credit_check_failed"}`; stream ends. `key_revoked`: an API key on the account was revoked after this stream opened (streams opened on another still-valid key close too; reconnect to continue). `monthly_cap_reached`: the account's monthly spend cap was reached. |
@@ -1524,6 +1590,16 @@ components:
           - { type: integer, minimum: 1, maximum: 60 }
           - { type: string, enum: [all] }
         default: 5
+    VelocityRank:
+      name: velocityRank
+      in: query
+      required: false
+      description: |
+        Which expirations the velocity movers and halo rank over (requires
+        `velocity`): `nearest` (default) the nearest 5, as in the app; `all`
+        every expiration with velocity; `requested` exactly the response's
+        `expirations`. Per-node velocity is returned regardless.
+      schema: { type: string, enum: [nearest, all, requested], default: nearest }
     Layout:
       name: layout
       in: query
@@ -1617,6 +1693,83 @@ components:
             one column per entry in `expirations`: `matrix[i][j]` is the
             exposure at strike i for expiration j.
           items: { type: array, items: { type: number } }
+        velocity:
+          $ref: "#/components/schemas/VelocityDetail"
+
+    VelocityDetail:
+      type: object
+      description: |
+        Present only with `velocity=nodes` (`/v1/heatmap`). See *Velocity* in
+        the API description.
+      required: [lookbacks, expirations, rank, rankExpirations, movers, nodes]
+      properties:
+        asOf: { type: string, format: date-time, description: The instant the velocity describes. Absent when stale. }
+        lookbacks:
+          type: object
+          description: Per timeframe (`1m`..`1d`), the anchor snapshot compared against. A missing timeframe had none.
+          additionalProperties: { $ref: "#/components/schemas/VelocityAnchor" }
+        expirations:
+          type: array
+          description: Expirations with per-node velocity.
+          items: { type: string, format: date }
+        rank: { type: string, enum: [nearest, all, requested] }
+        rankExpirations:
+          type: array
+          description: Expirations the movers and halo were ranked over.
+          items: { type: string, format: date }
+        movers:
+          type: object
+          description: Every timeframe `1m`..`1d` is present; lists are empty when that timeframe had no lookback.
+          additionalProperties: { $ref: "#/components/schemas/VelocityMovers" }
+        halo: { $ref: "#/components/schemas/VelocityHalo" }
+        nodes:
+          type: array
+          description: Per-node velocity for the returned strikes x expirations (non-zero nodes).
+          items: { $ref: "#/components/schemas/VelocityNode" }
+        stale: { type: boolean, description: True when no velocity was available (the block is empty). }
+        reason:
+          type: string
+          description: Why a stale block is empty (reserved for historical velocity).
+          enum: [no_frame, point_reads_unavailable, busy]
+    VelocityNode:
+      type: object
+      required: [strike, expiration, value, delta, pct]
+      properties:
+        strike: { type: number }
+        expiration: { type: string, format: date }
+        value: { type: number, description: Exposure now. }
+        delta:
+          type: object
+          description: Per timeframe, `now - then`. A timeframe is absent when unknown (no lookback, or the node had no value then).
+          additionalProperties: { type: number }
+        pct:
+          type: object
+          description: Per timeframe, `(|now| - |then|) / |then| x 100`. Absent when unknown.
+          additionalProperties: { type: number }
+    VelocityAnchor:
+      type: object
+      required: [ts, bucket]
+      properties:
+        ts: { type: integer, format: int64, description: "Build time of the anchor snapshot, Unix ms." }
+        bucket: { type: integer, format: int64, description: "Its 30 s bucket, Unix seconds." }
+    VelocityMovers:
+      type: object
+      required: [topRisers, topFallers]
+      properties:
+        topRisers: { type: array, items: { $ref: "#/components/schemas/NodeVelocity" } }
+        topFallers: { type: array, items: { $ref: "#/components/schemas/NodeVelocity" } }
+    VelocityHalo:
+      type: object
+      description: Per-strike direction per timeframe. `strikes[i]` corresponds to character i of each vector.
+      properties:
+        strikes: { type: array, items: { type: number } }
+        vectors:
+          type: object
+          additionalProperties:
+            type: object
+            properties:
+              front: { type: string, description: "Nearest expiration: `+`, `-` or `0` per strike." }
+              net: { type: string, description: "Sum across the ranked expirations: `+`, `-` or `0` per strike." }
 
     StrikeNode:
       type: object
@@ -1632,9 +1785,24 @@ components:
           enum: [king, gatekeeper, pika, barney, significant, normal]
         velocityPct:
           type: number
+          deprecated: true
           description: |
-            Live percent change of this strike's value over the velocity window.
+            Deprecated: use `velocityPctSigned` (same value) or
+            `velocityPctMagnitude`. Live signed percent change of this strike's
+            net value vs the board 5 minutes earlier, `(v - pv) / |pv| x 100`.
             Present on `/v1/heatmap` only; omitted on `/v1/historical`.
+        velocityPctSigned:
+          type: number
+          description: |
+            Same as `velocityPct`: `(v - pv) / |pv| x 100` of the strike's net
+            value vs 5 minutes earlier; negative exposure growing is negative.
+            0 when there was no prior value. `/v1/heatmap` only.
+        velocityPctMagnitude:
+          type: number
+          description: |
+            `(|v| - |pv|) / |pv| x 100` of the same inputs: the magnitude change,
+            the metric the app's velocity uses (exposure growing in either sign
+            is positive). 0 when there was no prior value. `/v1/heatmap` only.
 
     Meta:
       type: object
@@ -1876,21 +2044,47 @@ components:
               type: boolean
               description: True when newer boards replaced ones this client had not yet received (slow reader); this is the newest.
     StreamVelocity:
-      description: /v1/stream v2 `velocity` event payload.
+      description: |
+        /v1/stream v2 `velocity` event payload: the app's live velocity for
+        one symbol and metric. See *Velocity* in the API description.
       type: object
+      required: [symbol, metric, asOf, nodes, topRisers, topFallers, movers]
       properties:
         symbol: { type: string }
         metric: { type: string, enum: [gamma, vanna] }
-        asOf: { type: string, format: date-time }
+        asOf: { type: string, format: date-time, description: When the movers were published. }
+        snapshotAsOf: { type: integer, format: int64, description: Build time (Unix ms) of the snapshot the movers were computed from. }
         nodes:
           type: array
+          description: Always empty (kept for compatibility). Per-node velocity is on `/v1/heatmap?velocity=nodes`.
           items: { $ref: "#/components/schemas/NodeVelocity" }
         topRisers:
           type: array
+          description: Legacy; the `5m` risers (= `movers.5m.topRisers`).
           items: { $ref: "#/components/schemas/NodeVelocity" }
         topFallers:
           type: array
+          description: Legacy; the `5m` fallers (= `movers.5m.topFallers`).
           items: { $ref: "#/components/schemas/NodeVelocity" }
+        movers:
+          type: object
+          description: All seven timeframes `1m`..`1d`, always present; lists are empty when the timeframe had no lookback (see `lookbacks`).
+          additionalProperties: { $ref: "#/components/schemas/VelocityMovers" }
+        halo: { $ref: "#/components/schemas/VelocityHalo" }
+        lookbacks:
+          type: object
+          description: Per timeframe, the anchor snapshot compared against. A missing timeframe had none.
+          additionalProperties: { $ref: "#/components/schemas/VelocityAnchor" }
+        expirations:
+          type: array
+          description: Expirations with per-node velocity.
+          items: { type: string, format: date }
+        rankExpirations:
+          type: array
+          description: Expirations the movers and halo ranked over (the nearest 5).
+          items: { type: string, format: date }
+        final: { type: boolean, description: "The frame held from an equity's session close until the next open." }
+        stale: { type: boolean, description: Nothing is published for the symbol (lists empty). Replaces the previous frame. }
     NodeVelocity:
       type: object
       properties:

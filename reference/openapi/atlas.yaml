@@ -153,7 +153,15 @@ paths:
         - name: resolution
           in: query
           required: true
-          description: Bar size. Intraday minutes or `D`/`W`.
+          description: |
+            Bar size. Intraday minutes or `D`/`W`. With `extended=false`, the
+            1-hour tier (`60`, `240`, `480`) is built from regular-session hours
+            aligned to the 09:30 ET open: 09:30, 10:30 … 15:30 ET on a full
+            session, the last one covering 15:30–16:00. Each hour is the fold of
+            the `resolution=1` minute bars in its window. The server does not
+            aggregate above one hour: `240` and `480` return the same hourly bars
+            as `60`, so a caller grouping them into 4-hour bars anchors at
+            09:30 ET (09:30, 13:30).
           schema:
             type: string
             enum: ["1", "2", "3", "5", "15", "30", "60", "240", "480", "D", "W"]
@@ -181,6 +189,16 @@ paths:
           description: |
             Include extended-hours (pre / post-market) bars. Default is regular
             trading hours only (09:30–16:00 ET).
+
+            Changed 2026-10-08: regular-hours bars on the 1-hour tier are
+            stamped on the half hour (09:30 … 15:30 ET), 30 minutes later than
+            the clock hours they replace. Each bar covers a new one-hour window
+            starting on the half hour, so its open, high, low, close and volume
+            are recomputed over that window, not merely restamped. This applies to every date, so a
+            1-hour-tier response cached before the change (older days are served
+            `immutable`) still carries the old clock-hour bars; re-fetch it
+            without the cache.
+            `extended=true` keeps clock-aligned hours.
           schema: { type: boolean, default: false }
       responses:
         "200":
@@ -433,6 +451,8 @@ paths:
         The TradingView `LibrarySymbolInfo` for one ticker — price scale,
         session, timezone, and supported resolutions the charting library needs
         before requesting history.
+
+        `session` is `"0400-2000"` for every symbol. With `/v1/history?extended=false` (the default), hour bars (60/240/480) anchor at 09:30 ET, so resample 2h/4h from 09:30, not from `session`; with `extended=true`, hour bars are clock-aligned.
       parameters:
         - $ref: "#/components/parameters/Symbol"
       responses:
@@ -450,7 +470,7 @@ paths:
                     name: SPY
                     description: "SPDR S&P 500 ETF Trust"
                     type: etf
-                    session: "0930-1600"
+                    session: "0400-2000"
                     timezone: America/New_York
                     exchange: ARCA
                     minmov: 1
@@ -672,7 +692,11 @@ components:
         name: { type: string }
         description: { type: string }
         type: { type: string, enum: [stock, etf, index] }
-        session: { type: string, example: "0930-1600" }
+        session:
+          type: string
+          example: "0400-2000"
+          description: >-
+            `session` is `"0400-2000"` for every symbol. With `/v1/history?extended=false` (the default), hour bars (60/240/480) anchor at 09:30 ET, so resample 2h/4h from 09:30, not from `session`; with `extended=true`, hour bars are clock-aligned.
         timezone: { type: string, example: America/New_York }
         exchange: { type: string, example: ARCA }
         minmov: { type: integer, example: 1 }
