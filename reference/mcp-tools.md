@@ -147,7 +147,7 @@ Off-exchange (TRF) prints. No side / BBO / greeks — these are raw block prints
 | --- | --- | --- | --- | --: |
 | `heat_heatmap` | Current per-strike gamma/vanna heatmap + live velocity (multi-symbol) | **`symbols`**, `expirations`, `layout`, `max_expirations`, `max_strikes`, `metric` | `GET /v1/heatmap` | 1 |
 | `heat_levels` | Key levels only: classified nodes (king, gatekeeper, pika, barney, significant), strongest first, with distance from spot | **`symbols`**, `expirations`, `max_expirations`, `max_strikes`, `metric` | `GET /v1/gex/levels` | 1 |
-| `heat_historical_heatmap` | Replay the heatmap at a past instant (up to 365 days back) | **`symbols`**, **`at`**, `expirations`, `max_expirations`, `max_strikes`, `metric` | `GET /v1/historical` | 5 |
+| `heat_historical_heatmap` | Replay the heatmap at a past instant (back to 2023-03-28) | **`symbols`**, **`at`**, `expirations`, `max_expirations`, `max_strikes`, `metric` | `GET /v1/historical` | 5 |
 | `heat_stats_daily` | Daily gamma/vanna stats for up to 50 symbols over up to 31 days (400 symbol-days): spot OHLC, largest positive and negative strike exposure, concentration | **`symbols`**, **`from`**, `metric`, `to` | `GET /v1/stats/daily` | 5 |
 | `heat_symbols` | Every symbol with gamma/vanna data: index flag, previous tickers after a rename, available metrics and history date range | none | `GET /v1/symbols` | 0 |
 

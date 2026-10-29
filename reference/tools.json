@@ -320,7 +320,7 @@
     {
       "name": "heat_historical_heatmap",
       "section": "Heatseeker \u2014 gamma/vanna heatmaps",
-      "returns": "Replay the heatmap at a past instant (up to 365 days back)",
+      "returns": "Replay the heatmap at a past instant (back to 2023-03-28)",
       "endpoint": "GET /v1/historical",
       "credits": "5"
     },
