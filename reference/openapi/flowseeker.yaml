@@ -816,7 +816,7 @@ paths:
         | Event | Payload | Meaning |
         |---|---|---|
         | `connected` | stream terms | First frame after the stream opens. |
-        | `trade` | trade object | A trade that passed your filters. Flags `sweep_trade`, `multi_leg` and `cross_trade` are always present. |
+        | `trade` | trade object | A trade that passed your filters. Flags `sweep_trade`, `multi_leg` and `cross_trade` are always present. The SSE `id:` is the trade's `trade_id`. |
         | `credits` | `{"remaining": N}` | Emitted each minute after billing. |
         | `lagged` | `{"dropped": N}` | You read slower than the tape; trades were skipped. |
         | `closed` | `{"reason": "..."}` | Terminal. `insufficient_credits`, `account_suspended`, `credit_check_failed`, or `feed_unavailable`. |
@@ -824,6 +824,22 @@ paths:
 
         A `:` comment arrives every 30s as a proxy keepalive. Treat a stalled
         stream as a reconnect signal.
+
+        ### Matching trades to `/v1/flow/{ticker}`
+
+        Each `trade` carries these fields with the same values as the REST
+        trade, so the two feeds can be joined exactly:
+
+        | Stream field | REST field | Notes |
+        |---|---|---|
+        | `trade_id` | `tradeId` | Stable; the same print always has the same id. |
+        | `ts_event_ns` | `timestampNs` | Nanoseconds since the epoch, as a string. `ts_event` stays in milliseconds. |
+        | `moneyness_category` | `moneyness` | `DEEP_ITM`, `ITM`, `ATM`, `OTM`, `DEEP_OTM`. The stream's own `moneyness` is the simple side-of-spot label (`ITM`/`ATM`/`OTM`). |
+        | `liquidity_grade` | `liquidityGrade` | `null` when either side of the quote is missing. |
+
+        Prints of one contract often share a millisecond, so match on
+        `trade_id` (or `ts_event_ns` plus `raw_symbol`), not on `ts_event`.
+        A missing quote is `null` on both feeds.
 
         ### Example
 
@@ -1316,14 +1332,14 @@ paths:
         into a single row from `/v1/flow/{ticker}`.
 
         The `trade_id` path parameter accepts three formats: the canonical
-        `flow_{hex}_{idx}` id returned by the flow feed, a bare hex
-        timestamp (`188afe42c3a77af2`), or a raw nanosecond integer.
+        `flow_{hex}_{suffix}` id returned by the flow feed and stream, a bare
+        hex timestamp (`188afe42c3a77af2`), or a raw nanosecond integer.
       parameters:
         - name: trade_id
           in: path
           required: true
           description: |
-            Trade id (`flow_{hex}_{idx}`, bare hex timestamp, or raw nanos).
+            Trade id (`flow_{hex}_{suffix}`, bare hex timestamp, or raw nanos).
           schema:
             type: string
             example: "flow_188afe42c3a77af2_0"
@@ -1921,6 +1937,82 @@ paths:
           content:
             application/json:
               schema: { $ref: "#/components/schemas/UnderlyingChartSuccess" }
+        "400": { $ref: "#/components/responses/BadRequest" }
+        "401": { $ref: "#/components/responses/Unauthorized" }
+        "402": { $ref: "#/components/responses/InsufficientCredits" }
+        "429": { $ref: "#/components/responses/RateLimited" }
+        "403": { $ref: "#/components/responses/Forbidden" }
+        "500": { $ref: "#/components/responses/InternalError" }
+        "503": { $ref: "#/components/responses/Unavailable" }
+        "404": { $ref: "#/components/responses/NotFound" }
+        "504": { $ref: "#/components/responses/GatewayTimeout" }
+
+  /v1/underlying/{ticker}/flux-field:
+    get:
+      summary: Flux Field level and bands for a ticker
+      operationId: getUnderlyingFluxField
+      x-credits: 1
+      tags: [Underlying]
+      description: |
+        Skylit's proprietary Flux Field for the underlying: a level with an
+        inner, an outer and an extreme band around it, the same series the
+        Flux Field indicator draws on Skylit charts. Price above the level
+        means aggressive buyers are in control; a tag of the outer band is
+        stretched, and the extreme band is reached only on outsized moves.
+        Reclaiming or losing the level or the inner band frames trend entries
+        and exits.
+
+        One point per regular-hours minute (`resolution=1min`) or per trading
+        day (`resolution=1d`, the session's last value). Minutes without
+        qualifying options activity carry no point. Off-hours and on a
+        holiday the latest session is returned.
+      parameters:
+        - $ref: "#/components/parameters/Ticker"
+        - in: query
+          name: interval
+          required: false
+          description: |
+            Trading days covered, ending with `date`: `1D` to `30D` at
+            `resolution=1min`, `1D` to `252D` (one year) at `resolution=1d`.
+            Data covers the last 365 calendar days, so a window reaching
+            further back (an older `date`) returns only the days inside it.
+          schema: { type: string, default: "1D", example: "5D" }
+        - in: query
+          name: resolution
+          required: false
+          description: One point per minute (`1min`) or per trading day (`1d`).
+          schema:
+            type: string
+            enum: [1min, 1d]
+            default: 1min
+        - in: query
+          name: anchor
+          required: false
+          description: |
+            Where the level restarts: every session, or the start of each
+            week, month, quarter or year (carried across sessions). Defaults
+            to `session` at `resolution=1min` and `month` at `resolution=1d`.
+          schema:
+            type: string
+            enum: [session, week, month, quarter, year]
+        - in: query
+          name: date
+          required: false
+          description: Last trading day covered. Defaults to the current or latest session.
+          schema: { type: string, format: date, example: "2026-10-29" }
+        - in: query
+          name: limit
+          required: false
+          description: |
+            Return only the most recent N points of the window (default: all).
+            The bands are computed over the whole window either way.
+          schema: { type: integer, minimum: 1, example: 60 }
+      responses:
+        "200":
+          description: Flux Field points, oldest first.
+          content:
+            application/json:
+              schema: { $ref: "#/components/schemas/FluxFieldSuccess" }
         "400": { $ref: "#/components/responses/BadRequest" }
         "401": { $ref: "#/components/responses/Unauthorized" }
         "402": { $ref: "#/components/responses/InsufficientCredits" }
@@ -4013,8 +4105,22 @@ components:
          contracts, premium, price, bid, ask, mid,
          underlyingPrice, isSweep, isMultiLeg, isCross, moneyness, scores]
       properties:
-        timestamp: { type: string, format: date-time }
-        tradeId: { type: string, example: "flow_188afe42c3a77af2_0" }
+        timestamp:
+          type: string
+          format: date-time
+          description: Exchange time, truncated to the second. Use `timestampNs` to order or match trades.
+        timestampNs:
+          type: string
+          description: Exchange time in nanoseconds since the epoch, as a string to keep full precision.
+          example: "1761485573123456789"
+        tradeId:
+          type: string
+          description: |
+            Stable trade id: the same print has the same id on every request
+            and on `/v1/flow/stream` (`trade_id`). `flow_` + hex nanosecond
+            timestamp + `_` + a suffix telling apart prints that share a
+            nanosecond.
+          example: "flow_188afe42c3a77af2_9e3c1a7b5d2f4e60"
         optionType: { type: string, enum: [CALL, PUT] }
         strike: { type: number }
         expiration: { type: string, format: date }
@@ -4031,17 +4137,18 @@ components:
         contracts: { type: integer, minimum: 1 }
         premium: { type: number, description: Total premium in USD. }
         price: { type: number, description: Trade price per contract. }
-        bid: { type: number }
-        ask: { type: number }
-        mid: { type: number }
-        spreadWidth: { type: number }
-        spreadWidthPct: { type: number }
+        bid: { type: [number, "null"], description: Bid at trade time; `null` when there was no bid. }
+        ask: { type: [number, "null"], description: Ask at trade time; `null` when there was no ask. }
+        mid: { type: [number, "null"], description: "`null` unless both sides were quoted." }
+        spreadWidth: { type: [number, "null"], description: "`null` unless both sides were quoted." }
+        spreadWidthPct: { type: [number, "null"], description: "`null` unless both sides were quoted." }
         liquidityGrade:
-          type: string
+          type: [string, "null"]
           description: |
             Liquidity of the contract from its bid/ask spread as a percent of
             mid: `HIGH` (under 2%), `MEDIUM` (2–5%), `LOW` (5% or wider).
-          enum: [HIGH, MEDIUM, LOW]
+            `null` unless both sides were quoted.
+          enum: [HIGH, MEDIUM, LOW, null]
         underlyingPrice: { type: number }
         isSweep: { type: boolean }
         isMultiLeg: { type: boolean }
@@ -4056,6 +4163,11 @@ components:
           description: Number of distinct OPRA exchanges that filled the order.
         moneyness:
           type: string
+          description: |
+            From `moneynessPct` (negative is in the money), with the same bands
+            as the `moneyness` filter: `DEEP_ITM` (below −20%), `ITM` (−20% to
+            −3%), `ATM` (−3% to +3%), `OTM` (+3% to +20%), `DEEP_OTM` (+20% and
+            up).
           enum: [DEEP_ITM, ITM, ATM, OTM, DEEP_OTM]
         moneynessPct: { type: number }
         moneynessWeight: { type: number }
@@ -5506,6 +5618,43 @@ components:
         data:
           type: array
           items: { $ref: "#/components/schemas/UnderlyingChartBar" }
+        meta: { $ref: "#/components/schemas/Meta" }
+
+    FluxFieldBand:
+      type: object
+      required: [upper, lower]
+      properties:
+        upper: { type: number, format: double, description: Upper line of the band. }
+        lower: { type: number, format: double, description: Lower line of the band. }
+
+    FluxFieldPoint:
+      type: object
+      required: [time, level, inner, outer, extreme, price]
+      properties:
+        time: { type: integer, format: int64, description: "Epoch seconds: the minute's start, or the session's last minute at `resolution=1d`." }
+        level: { type: number, format: double, description: The Flux Field level. }
+        inner: { $ref: "#/components/schemas/FluxFieldBand" }
+        outer: { $ref: "#/components/schemas/FluxFieldBand" }
+        extreme: { $ref: "#/components/schemas/FluxFieldBand" }
+        price: { type: number, format: double, description: The underlying's price at `time`. }
+
+    FluxField:
+      type: object
+      required: [ticker, interval, resolution, anchor, points]
+      properties:
+        ticker: { type: string, example: SPY }
+        interval: { type: string, example: "1D" }
+        resolution: { type: string, enum: [1min, 1d] }
+        anchor: { type: string, enum: [session, week, month, quarter, year] }
+        points:
+          type: array
+          items: { $ref: "#/components/schemas/FluxFieldPoint" }
+
+    FluxFieldSuccess:
+      type: object
+      required: [data, meta]
+      properties:
+        data: { $ref: "#/components/schemas/FluxField" }
         meta: { $ref: "#/components/schemas/Meta" }
 
     OptionTradeRow:

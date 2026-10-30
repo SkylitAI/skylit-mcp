@@ -1,6 +1,6 @@
 {
   "server": "https://mcp.skylit.ai/mcp",
-  "count": 68,
+  "count": 69,
   "tools": [
     {
       "name": "flow_search",
@@ -259,6 +259,13 @@
       "section": "Chains, charts & RVOL",
       "returns": "Relative-volume bars for a single contract",
       "endpoint": "GET /v1/contract/{symbol}/rvol",
+      "credits": "1"
+    },
+    {
+      "name": "flux_field",
+      "section": "Chains, charts & RVOL",
+      "returns": "Flux Field level with its inner, outer and extreme bands for an underlying (latest 100 points unless `limit` is set)",
+      "endpoint": "GET /v1/underlying/{ticker}/flux-field",
       "credits": "1"
     },
     {

@@ -646,6 +646,11 @@ paths:
                             asOf: { type: string, format: date-time }
                             spot: { type: number }
                             previousClose: { type: number }
+                            expirations:
+                              type: array
+                              description: Expirations the levels were netted over (`YYYY-MM-DD`, nearest first), as `maxExpirations` or `expirations` resolved on this snapshot.
+                              items: { type: string, format: date }
+                              example: ["2026-05-22"]
                             kingNode:
                               description: The strongest king node, or null when none is classified.
                               nullable: true
@@ -1744,7 +1749,7 @@ components:
           additionalProperties: { type: number }
         pct:
           type: object
-          description: Per timeframe, `(|now| - |then|) / |then| x 100`. Absent when unknown.
+          description: Per timeframe, `(|now| - |then|) / |then| x 100`. Absent when unknown, and (when the velocity rule's floor is on) when `|then|` is below the floor ($100K gamma, $500K vanna), since a percentage of a sub-floor base is not shown; `delta` is still given.
           additionalProperties: { type: number }
     VelocityAnchor:
       type: object
@@ -1758,6 +1763,14 @@ components:
       properties:
         topRisers: { type: array, items: { $ref: "#/components/schemas/NodeVelocity" } }
         topFallers: { type: array, items: { $ref: "#/components/schemas/NodeVelocity" } }
+        new:
+          type: array
+          items: { $ref: "#/components/schemas/NodeVelocity" }
+          description: "Additive. NEW positions: strikes whose exposure rose to at least the floor ($100K gamma, $500K vanna) since the lookback, from zero or from below the floor, top 10 by how much the size changed. The timeframe's delta is now minus then and its percent is 0 (never a percentage of a sub-floor base). Absent when the server does not compute positions; [] when there are none."
+        closed:
+          type: array
+          items: { $ref: "#/components/schemas/NodeVelocity" }
+          description: "Additive. CLOSED positions: strikes whose exposure fell from at least the floor ($100K gamma, $500K vanna) to zero or to below the floor since the lookback, top 10 by how much the size changed. currentValue is the current exposure (0 when it went to zero); the timeframe's delta and percent are the real change from the above-floor value (-100% to zero). Absent when the server does not compute positions."
     VelocityHalo:
       type: object
       description: Per-strike direction per timeframe. `strikes[i]` corresponds to character i of each vector.
@@ -2108,6 +2121,10 @@ components:
         velocity: { type: number, description: Average change per minute over 5 minutes. }
         trend: { type: string, enum: [increasing, decreasing, stable] }
         history: { type: array, items: { type: number } }
+        belowFloor:
+          type: array
+          items: { type: string }
+          description: "Additive. Timeframes (\"1m\"..\"1d\") whose base was below the mover floor ($100K gamma, $500K vanna). Their percent is withheld and reads 0 (not a real no-change); the delta is kept. Absent when nothing is withheld."
     StreamResumed:
       description: /v1/stream v2 `resumed` event payload.
       type: object

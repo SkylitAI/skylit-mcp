@@ -123,7 +123,7 @@ Details: [Intelligence tools](https://www.skylit.ai/docs/mcp/intelligence?utm_so
 ## Tools
 
 <!-- sync:tools:start -->
-68 tools, all read-only. Most wrap one Skylit REST endpoint with the same credit cost; the intelligence tools combine several and are served on their own list (`/mcp?toolset=intelligence`). Full catalog with arguments and prices: [www.skylit.ai/docs/mcp/tools](https://www.skylit.ai/docs/mcp/tools?utm_source=github&utm_medium=developer&utm_campaign=api_distribution&utm_content=readme); machine-readable copy: [reference/tools.json](reference/tools.json).
+69 tools, all read-only. Most wrap one Skylit REST endpoint with the same credit cost; the intelligence tools combine several and are served on their own list (`/mcp?toolset=intelligence`). Full catalog with arguments and prices: [www.skylit.ai/docs/mcp/tools](https://www.skylit.ai/docs/mcp/tools?utm_source=github&utm_medium=developer&utm_campaign=api_distribution&utm_content=readme); machine-readable copy: [reference/tools.json](reference/tools.json).
 
 | Group | Tools |
 | --- | --- |
@@ -134,7 +134,7 @@ Details: [Intelligence tools](https://www.skylit.ai/docs/mcp/intelligence?utm_so
 | Screeners | `top_underlyings_daily`, `top_underlyings_weekly`, `top_contracts_daily`, `top_contracts_weekly`, `unusual_volume`, `unusual_oi` |
 | Bull/bear & pressure ratios | `chain_bull_bear`, `contract_bull_bear`, `chain_ratio`, `contract_ratio` |
 | Stats, Vol/OI & moneyness | `underlying_stats`, `underlying_bulk_stats`, `contract_bulk_stats`, `underlying_history`, `contract_history`, `flow_historical_compare`, `contract_stats`, `vol_oi`, `moneyness` |
-| Chains, charts & RVOL | `option_chain`, `underlying_chart`, `contract_chart`, `underlying_rvol`, `contract_rvol` |
+| Chains, charts & RVOL | `option_chain`, `underlying_chart`, `contract_chart`, `underlying_rvol`, `contract_rvol`, `flux_field` |
 | Market-wide & sector | `market_overview`, `market_tide`, `market_breadth`, `sector_flow` |
 | Dark pool | `dark_pool_trades`, `dark_pool_top_prints` |
 | Heatseeker — gamma/vanna heatmaps | `heat_heatmap`, `heat_levels`, `heat_historical_heatmap`, `heat_stats_daily`, `heat_symbols` |
