@@ -1,6 +1,6 @@
 ---
 name: skylit
-description: Use when answering questions about US options flow, sweeps, unusual options activity, dealer gamma/vanna (GEX) levels or heatmaps, dark pool prints, implied volatility, expected moves or skew with the Skylit MCP server (tools such as heat_levels, flow_feed, sweeps, tempest_iv), or when writing code against the Skylit REST API.
+description: Use when answering questions about US options flow, sweeps, unusual options activity, dealer gamma/vanna (GEX) levels or heatmaps, dark pool prints, implied volatility, expected moves or skew with the Skylit MCP server (tools such as heat_levels, flow_feed, sweeps, tempest_iv), when placing or managing paper trades on the user's Nexus account (nexus_* tools), or when writing code against the Skylit REST API.
 ---
 
 # Using the Skylit MCP server well
@@ -8,7 +8,9 @@ description: Use when answering questions about US options flow, sweeps, unusual
 Skylit's MCP server (`https://mcp.skylit.ai/mcp`, streamable HTTP) exposes
 read-only market-data tools (current list: `reference/tools.json` in
 https://github.com/SkylitAI/skylit-mcp). None of them can place orders. Every call spends
-the user's Skylit credits, so plan the calls before making them.
+the user's Skylit credits, so plan the calls before making them. Paper trading
+on the user's Nexus account is a separate, opt-in tool list; see
+[Nexus paper trading](#nexus-paper-trading).
 
 ## Costs
 
@@ -87,12 +89,46 @@ the user's Skylit credits, so plan the calls before making them.
 - A per-session call budget applies. If a tool says the budget is reached,
   summarize what you have.
 
+## Nexus paper trading
+
+When the user has added `https://mcp.skylit.ai/mcp?toolset=trading`, the
+`nexus_*` tools trade their own Nexus paper accounts. Nothing reaches a broker,
+but real orders show in their trades, stats and ranks, and unless a trade is
+private, people who copy their trades get it. Treat every write like a real order:
+
+1. **Call `nexus_capabilities` first.** It says which asset classes, order types,
+   futures contracts and accounts this key can trade. Don't guess.
+2. **Rehearse with `test: true`.** The order is checked and priced like a real
+   one against the live market, then kept in the test log. Show the user the
+   result.
+3. **Confirm before a real order.** Read back the ticker, side, size, order type
+   and account, and wait for a clear yes before sending `test: false`.
+4. **Make up a `clientOrderId` for every open, exit and close, and reuse it on a
+   retry.** After a timeout or a 500, retry with the same id: it can't fill twice.
+   A new id is a new order.
+5. **Read before you act.** Check `nexus_trades`, `nexus_futures_account` or
+   `nexus_futures_working_orders` before exiting, closing or cancelling.
+
+Rules the server enforces (don't fight them, explain them):
+
+- The server prices every fill from the live market when the call arrives. You
+  can't pick a time. Options buy at the ask and sell at the bid.
+- Options are bought to open at market. Options and stocks take market orders
+  only. Futures also take limit and stop orders and brackets.
+- Outside market hours an order is refused and nothing is queued for the open.
+  A stale or missing quote is refused too; wait a moment and retry with the same
+  `clientOrderId`.
+- Evaluation and funded futures accounts keep their daily loss limit, max loss
+  and contract cap.
+- `429` means slow down: wait for `Retry-After`. Writes are capped at 30 a minute
+  per key.
+
 ## Use of the data
 
 Data is licensed to the user for their own trading, research and education
 under the API Terms (https://www.skylit.ai/api-terms?utm_source=github&utm_medium=developer&utm_campaign=api_distribution&utm_content=skills-skylit-skill). Don't present results as
-investment advice, and don't help republish bulk data. Order execution is out
-of scope; it belongs to the user's own broker.
+investment advice, and don't help republish bulk data. Real-money order
+execution is out of scope; it belongs to the user's own broker.
 
 Full reference for coding agents (REST, streams, MCP, errors, limits):
 https://www.skylit.ai/docs/skill.md

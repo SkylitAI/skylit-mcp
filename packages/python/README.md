@@ -2,7 +2,7 @@
 
 A small Python client for [Skylit](https://www.skylit.ai/?utm_source=pypi&utm_medium=developer&utm_campaign=api_distribution&utm_content=packages-python-readme) market data. Skylit covers options flow, volatility, dealer positioning (GEX/vanna levels and point-in-time replay) and dark pool, and is built for AI trading agents and the people who build them.
 
-The client has no dependencies, and every call is read-only: it fetches data and never places orders.
+The client has no dependencies. Market data calls are read-only. The Nexus trading calls place paper trades on your own Nexus account and never reach a broker (see below).
 
 ```bash
 pip install skylit
@@ -24,6 +24,28 @@ client.get("/v1/vol/screener", limit=20)      # any documented endpoint
 ```
 
 Responses are the API's JSON, `{"data": ..., "meta": ...}`. `meta` carries the remaining credits and the rate-limit state. Errors raise `skylit.SkylitError` with `.status`, `.code` and `.message`. Failed calls are not charged.
+
+## Nexus paper trading
+
+The same key trades your Nexus paper accounts through the Nexus Trades API: options and stocks in your paper wallet, futures in your practice, evaluation or funded account. The server prices every fill from the live market and runs the same account rules as Nexus. Order bodies use the API's field names.
+
+```python
+client.trading_capabilities()                 # what this key can trade right now
+
+order = client.open_trade(contract="SPY 600C 10/16", quantity=1,
+                          clientOrderId="spy-call-1", test=True)   # rehearse first
+client.trades("open")                         # your open options and stock trades
+client.exit_trade(order["data"]["id"], quantity=1, clientOrderId="spy-call-1-trim")
+
+client.open_trade(assetClass="futures", ticker="NQ", side="buy", quantity=1,
+                  clientOrderId="nq-1", test=True)
+client.futures_account("practice")            # balance, positions, loss rules
+client.close_futures("practice", ticker="NQ", clientOrderId="nq-1-close", test=True)
+```
+
+- `test=True` checks and prices an order like a real one, then keeps it in your test log instead of placing it.
+- Send a `clientOrderId` you make up and reuse it if you retry: you get the first order back and nothing new is placed.
+- Futures resting orders: `futures_working_orders`, `futures_order`, `cancel_futures_order`, `cancel_futures_orders`, `modify_futures_order`. History: `futures_orders`.
 
 ## Agents
 

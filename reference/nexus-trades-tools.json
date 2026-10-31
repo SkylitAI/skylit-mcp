@@ -1,0 +1,418 @@
+{
+  "server": "https://mcp.skylit.ai/mcp?toolset=trading",
+  "spec": "openapi/nexus-trades.json",
+  "baseUrl": "https://app.skylit.ai",
+  "notes": "Trading tools for the member's own Nexus paper accounts, on their own opt-in tool list. Each tool calls one Nexus Trades API route with the member's Skylit API key. Arguments named like a path placeholder fill the path; on GET the rest go in the query string, on POST the rest are the JSON body. Hand-kept: scripts/sync.py --check fails when a tool and the spec disagree.",
+  "pendingProduction": "Tools and arguments marked \"x-requires\": \"second-prod-set\" (options and stock limits and stops, options stop-losses, the wallet order routes, adds, futures stop-limit and size change, futures in nexus_trades) are on the Nexus staging API only. Serve them once production has them (nexus #795, #796 and the #791 port). The agent account and nexus_wallet are on production.",
+  "count": 20,
+  "tools": [
+    {
+      "name": "nexus_capabilities",
+      "title": "Nexus trading capabilities",
+      "section": "Account and capabilities",
+      "endpoint": "GET /api/nexus/v1/trading/capabilities",
+      "operationId": "getCapabilities",
+      "annotations": { "readOnlyHint": true, "destructiveHint": false, "idempotentHint": true, "openWorldHint": false },
+      "description": "What this key can trade in Nexus right now: asset classes, order types, futures contracts and accounts. Read only, it changes nothing. Call it before any order so you never have to guess.",
+      "inputSchema": { "type": "object", "properties": {}, "additionalProperties": false }
+    },
+    {
+      "name": "nexus_trades",
+      "title": "List Nexus trades",
+      "section": "Options and stocks",
+      "endpoint": "GET /api/nexus/v1/trades",
+      "operationId": "listTrades",
+      "annotations": { "readOnlyHint": true, "destructiveHint": false, "idempotentHint": true, "openWorldHint": false },
+      "description": "Your Nexus paper options and stock trades. Read only. Filter by status and page with limit and offset. account: agent lists your bot's agent wallet instead. assetClass: futures lists one futures account's open positions and closed trades (needs the second production set). With test: true it lists your test log (your 10 newest test orders) instead.",
+      "inputSchema": {
+        "type": "object",
+        "properties": {
+          "assetClass": { "type": "string", "enum": ["futures"], "x-requires": "second-prod-set", "description": "futures lists one futures account's positions and closed trades. Leave it out for options and stocks." },
+          "account": { "type": "string", "description": "Options and stocks: agent lists your bot's wallet; leave it out for yours. Futures: practice (or left out), agent, evaluation, funded or an account id." },
+          "status": { "type": "string", "enum": ["open", "closed", "all"], "default": "all", "description": "Which trades to list." },
+          "limit": { "type": "integer", "minimum": 1, "maximum": 200, "default": 50, "description": "Page size." },
+          "offset": { "type": "integer", "minimum": 0, "maximum": 100000, "default": 0, "description": "How many trades to skip." },
+          "test": { "type": "boolean", "default": false, "description": "true lists your test log instead of your trades." }
+        },
+        "additionalProperties": false
+      }
+    },
+    {
+      "name": "nexus_trade",
+      "title": "Read a Nexus trade",
+      "section": "Options and stocks",
+      "endpoint": "GET /api/nexus/v1/trades/{id}",
+      "operationId": "getTrade",
+      "annotations": { "readOnlyHint": true, "destructiveHint": false, "idempotentHint": true, "openWorldHint": false },
+      "description": "One of your Nexus paper options or stock trades, with its exits. Read only. Works with a test order's id too.",
+      "inputSchema": {
+        "type": "object",
+        "properties": {
+          "id": { "type": "string", "format": "uuid", "description": "The trade's id, from nexus_open_trade or nexus_trades." }
+        },
+        "required": ["id"],
+        "additionalProperties": false
+      }
+    },
+    {
+      "name": "nexus_open_trade",
+      "title": "Open a Nexus paper trade",
+      "section": "Options and stocks",
+      "endpoint": "POST /api/nexus/v1/trades",
+      "operationId": "openTrade",
+      "annotations": { "readOnlyHint": false, "destructiveHint": true, "idempotentHint": true, "openWorldHint": false },
+      "description": "Places a PAPER trade on the user's own Nexus account. Options and stocks go to their Nexus paper wallet; futures go to their practice account, or to an evaluation or funded account named in account. Nothing is sent to a broker. The server prices the fill from the live market when the call arrives. A real order counts like one placed by hand: it shows in their trades, stats and ranks, and unless the trade is private, people who copy their trades get it too. Send test: true first: the order is checked and priced like a real one, then kept in the test log and never placed. Confirm the order with the user before sending test: false. Always make up a clientOrderId and reuse it if you retry, so a retry can't place a second order. account: agent sends any order to the user's bot account, which never counts anywhere public. Options are bought to open. Market orders fill now; an options limit, or a stock limit or stop, rests on the wallet and holds back buying power until it fills (manage it with nexus_working_orders, nexus_modify_order and nexus_cancel_order). Already holding the contract? Use nexus_add_to_trade instead of a second open. Call nexus_capabilities first: limits, stops and stop_limit need the second production set.",
+      "inputSchema": {
+        "type": "object",
+        "properties": {
+          "assetClass": { "type": "string", "enum": ["options", "stocks", "futures"], "default": "options", "description": "Which book the order goes to." },
+          "contract": { "type": "string", "description": "Options shorthand, like SPY 600C 10/16. Send this, or ticker, strike, direction and expiration." },
+          "ticker": { "type": "string", "description": "A symbol like SPY. For futures, a product like NQ (the front month) or one contract like NQZ26." },
+          "direction": { "type": "string", "enum": ["call", "put"], "description": "Options only." },
+          "strike": { "type": "number", "description": "Options only, like 600 or 602.5." },
+          "expiration": { "type": "string", "format": "date", "description": "Options only, like 2026-10-16." },
+          "side": { "type": "string", "enum": ["buy", "sell"], "description": "Stocks and futures. Options are always bought to open." },
+          "quantity": { "type": "integer", "minimum": 1, "maximum": 100000, "description": "Options 1 to 1,000 contracts, stocks 1 to 100,000 shares, futures 1 to 100 contracts." },
+          "price": { "type": "number", "description": "Options and stocks: a fill price the user got elsewhere, taken only inside a small window around the live quote." },
+          "ifOutside": { "type": "string", "enum": ["reject", "market"], "default": "reject", "description": "When price is outside the window: refuse, or fill at market." },
+          "orderType": { "type": "string", "enum": ["market", "limit", "stop", "stop_limit"], "default": "market", "description": "Options take market or limit. Stocks take market, limit or stop. Futures take market, limit, stop or stop_limit (with stopPrice and limitPrice). Options and stock limits and stops, and futures stop_limit, need the second production set." },
+          "limitPrice": { "type": "number", "description": "A limit or stop-limit: the price the order rests at. Options and stocks in cents, like 2.45." },
+          "stopPrice": { "type": "number", "description": "A stock stop, or a futures stop or stop-limit: the price that triggers it." },
+          "timeInForce": { "type": "string", "enum": ["day", "gtc"], "default": "day", "x-requires": "second-prod-set", "description": "Options and stock limits and stops: day works until 4:00 pm ET, gtc until the option's last trading day or 90 days for a stock." },
+          "stopLoss": { "type": "number", "description": "Futures: a stop loss placed with the entry." },
+          "takeProfit": { "type": "number", "description": "Futures: a take profit placed with the entry." },
+          "trailingStop": { "type": "boolean", "description": "Futures: the stop loss trails the price. Needs stopLoss." },
+          "reduceOnly": { "type": "boolean", "description": "Futures: only take contracts off a position the user holds, never open, add or flip." },
+          "account": { "type": "string", "description": "agent sends any order to the user's bot account. Futures also take practice (the default), evaluation, funded, or an account id from nexus_capabilities. For options and stocks, leave it out for the user's own paper wallet." },
+          "clientOrderId": { "type": "string", "pattern": "^[A-Za-z0-9_.:-]{1,64}$", "description": "Your own id for this order. Reuse the same one on a retry: you get the first order back and nothing new is placed." },
+          "test": { "type": "boolean", "description": "true checks and prices the order, then keeps it in the test log instead of placing it. Use it for the first call." }
+        },
+        "required": ["clientOrderId", "test"],
+        "additionalProperties": false
+      }
+    },
+    {
+      "name": "nexus_exit_trade",
+      "title": "Trim or close a Nexus paper trade",
+      "section": "Options and stocks",
+      "endpoint": "POST /api/nexus/v1/trades/{id}/exits",
+      "operationId": "exitTrade",
+      "annotations": { "readOnlyHint": false, "destructiveHint": true, "idempotentHint": true, "openWorldHint": false },
+      "description": "Sells some or all of one of the user's Nexus PAPER options or stock trades (on a short stock trade, buys it back). Nothing is sent to a broker. Send quantity to trim, or closeAll: true to close what's left, not both. At market by default. orderType limit with limitPrice rests until the market gets there; a stock also takes orderType stop with stopPrice. On an options trade, stopLoss and takeProfit arm a stop and a target on the STOCK's price, not the option's: when the stock trades through a level, the contracts sell at the option's live bid. Resting exits and stops need the second production set. A test trade's exit is always a test, so rehearse with a test trade first. Confirm with the user before exiting a real trade. Always make up a clientOrderId and reuse it if you retry.",
+      "inputSchema": {
+        "type": "object",
+        "properties": {
+          "id": { "type": "string", "format": "uuid", "description": "The trade's id, from nexus_open_trade or nexus_trades." },
+          "quantity": { "type": "integer", "minimum": 1, "description": "How many to sell." },
+          "closeAll": { "type": "boolean", "description": "true sells everything that's left." },
+          "price": { "type": "number", "description": "A fill price the user got elsewhere, taken only inside a small window around the live quote." },
+          "ifOutside": { "type": "string", "enum": ["reject", "market"], "default": "reject", "description": "When price is outside the window: refuse, or fill at market." },
+          "orderType": { "type": "string", "enum": ["market", "limit", "stop"], "default": "market", "x-requires": "second-prod-set", "description": "limit closes at your price. stop closes a stock when it trades through stopPrice, or arms an options stop on the stock's price." },
+          "limitPrice": { "type": "number", "x-requires": "second-prod-set", "description": "A limit exit: the least to take per contract or share (the most to pay to cover a short)." },
+          "stopPrice": { "type": "number", "x-requires": "second-prod-set", "description": "A stop exit. A stock: the price that sets it off. An option: the stock price the stop fires at, the same as stopLoss." },
+          "timeInForce": { "type": "string", "enum": ["day", "gtc"], "default": "day", "x-requires": "second-prod-set", "description": "Limit and stock stop exits. An options stop takes none: it stays on until it fires, is cancelled, or the contract expires." },
+          "stopLoss": { "type": "number", "x-requires": "second-prod-set", "description": "Options only: the STOCK price the stop fires at. On a call it sits under the stock's price, on a put over it." },
+          "takeProfit": { "type": "number", "x-requires": "second-prod-set", "description": "Options only: the STOCK price the target fires at. With stopLoss it's one bracket order." },
+          "clientOrderId": { "type": "string", "pattern": "^[A-Za-z0-9_.:-]{1,64}$", "description": "Your own id for this exit. Reuse the same one on a retry." },
+          "test": { "type": "boolean", "description": "Optional. The trade decides: a test trade's exit is always a test." }
+        },
+        "required": ["id", "clientOrderId"],
+        "additionalProperties": false
+      }
+    },
+    {
+      "name": "nexus_futures_account",
+      "title": "Read a Nexus futures account",
+      "section": "Futures",
+      "endpoint": "GET /api/nexus/v1/trading/accounts/{account}",
+      "operationId": "getFuturesAccount",
+      "annotations": { "readOnlyHint": true, "destructiveHint": false, "idempotentHint": true, "openWorldHint": false },
+      "description": "Balance, open positions and loss rules for one of the user's Nexus paper futures accounts. Read only.",
+      "inputSchema": {
+        "type": "object",
+        "properties": {
+          "account": { "type": "string", "default": "practice", "description": "practice, agent (the user's bot account), evaluation or funded (when exactly one is running), or an account id from nexus_capabilities." }
+        },
+        "required": ["account"],
+        "additionalProperties": false
+      }
+    },
+    {
+      "name": "nexus_futures_orders",
+      "title": "Nexus futures order history",
+      "section": "Futures",
+      "endpoint": "GET /api/nexus/v1/trading/accounts/{account}/orders",
+      "operationId": "listFuturesOrders",
+      "annotations": { "readOnlyHint": true, "destructiveHint": false, "idempotentHint": true, "openWorldHint": false },
+      "description": "Order and fill history for one of the user's Nexus paper futures accounts, newest first. Read only.",
+      "inputSchema": {
+        "type": "object",
+        "properties": {
+          "account": { "type": "string", "default": "practice", "description": "practice, agent (the user's bot account), evaluation, funded, or an account id." },
+          "limit": { "type": "integer", "minimum": 1, "maximum": 200, "default": 50, "description": "Page size." },
+          "before": { "type": "string", "format": "date-time", "description": "Only orders placed before this time, like 2026-10-09T14:00:00Z." }
+        },
+        "required": ["account"],
+        "additionalProperties": false
+      }
+    },
+    {
+      "name": "nexus_futures_close",
+      "title": "Close or flatten Nexus paper futures",
+      "section": "Futures",
+      "endpoint": "POST /api/nexus/v1/trading/accounts/{account}/close",
+      "operationId": "closeFuturesPositions",
+      "annotations": { "readOnlyHint": false, "destructiveHint": true, "idempotentHint": true, "openWorldHint": false },
+      "description": "Closes one futures position, or flattens the whole account, at market on the user's Nexus PAPER futures account. Nothing is sent to a broker. Send ticker or closeAll: true, not both. test: true previews the close against what the account really holds and places nothing. Confirm with the user before a real close. Always make up a clientOrderId and reuse it if you retry.",
+      "inputSchema": {
+        "type": "object",
+        "properties": {
+          "account": { "type": "string", "default": "practice", "description": "practice, agent (the user's bot account), evaluation, funded, or an account id." },
+          "ticker": { "type": "string", "description": "The position to close, like NQ or NQZ26." },
+          "closeAll": { "type": "boolean", "description": "true flattens every position in the account." },
+          "clientOrderId": { "type": "string", "pattern": "^[A-Za-z0-9_.:-]{1,64}$", "description": "Your own id for this close. Reuse the same one on a retry." },
+          "test": { "type": "boolean", "description": "true previews the close and places nothing." }
+        },
+        "required": ["account", "clientOrderId"],
+        "additionalProperties": false
+      }
+    },
+    {
+      "name": "nexus_futures_working_orders",
+      "title": "Resting Nexus futures orders",
+      "section": "Futures resting orders",
+      "endpoint": "GET /api/nexus/v1/trading/accounts/{account}/orders/working",
+      "operationId": "listFuturesWorkingOrders",
+      "annotations": { "readOnlyHint": true, "destructiveHint": false, "idempotentHint": true, "openWorldHint": false },
+      "description": "Limit, stop and bracket orders resting on one of the user's Nexus paper futures accounts. Read only.",
+      "inputSchema": {
+        "type": "object",
+        "properties": {
+          "account": { "type": "string", "default": "practice", "description": "practice, agent (the user's bot account), evaluation, funded, or an account id." }
+        },
+        "required": ["account"],
+        "additionalProperties": false
+      }
+    },
+    {
+      "name": "nexus_futures_order",
+      "title": "Read a Nexus futures order",
+      "section": "Futures resting orders",
+      "endpoint": "GET /api/nexus/v1/trading/accounts/{account}/orders/{orderId}",
+      "operationId": "getFuturesOrder",
+      "annotations": { "readOnlyHint": true, "destructiveHint": false, "idempotentHint": true, "openWorldHint": false },
+      "description": "One order on one of the user's Nexus paper futures accounts. Read only.",
+      "inputSchema": {
+        "type": "object",
+        "properties": {
+          "account": { "type": "string", "default": "practice", "description": "practice, agent (the user's bot account), evaluation, funded, or an account id." },
+          "orderId": { "type": "string", "format": "uuid", "description": "The order's id, from nexus_open_trade, nexus_futures_working_orders or nexus_futures_orders." }
+        },
+        "required": ["account", "orderId"],
+        "additionalProperties": false
+      }
+    },
+    {
+      "name": "nexus_futures_cancel_order",
+      "title": "Cancel a resting Nexus futures order",
+      "section": "Futures resting orders",
+      "endpoint": "POST /api/nexus/v1/trading/accounts/{account}/orders/{orderId}/cancel",
+      "operationId": "cancelFuturesOrder",
+      "annotations": { "readOnlyHint": false, "destructiveHint": true, "idempotentHint": true, "openWorldHint": false },
+      "description": "Cancels one resting order on the user's Nexus PAPER futures account. Nothing is sent to a broker. With test: true it acts on a test order in the test log only, never a real one. Confirm with the user before cancelling a real order.",
+      "inputSchema": {
+        "type": "object",
+        "properties": {
+          "account": { "type": "string", "default": "practice", "description": "practice, agent (the user's bot account), evaluation, funded, or an account id." },
+          "orderId": { "type": "string", "format": "uuid", "description": "The order's id." },
+          "test": { "type": "boolean", "description": "true acts on a test order in the test log only." }
+        },
+        "required": ["account", "orderId"],
+        "additionalProperties": false
+      }
+    },
+    {
+      "name": "nexus_futures_modify_order",
+      "title": "Move or resize a resting Nexus futures order",
+      "section": "Futures resting orders",
+      "endpoint": "POST /api/nexus/v1/trading/accounts/{account}/orders/{orderId}/modify",
+      "operationId": "modifyFuturesOrder",
+      "annotations": { "readOnlyHint": false, "destructiveHint": true, "idempotentHint": true, "openWorldHint": false },
+      "description": "Moves the price of one resting order on the user's Nexus PAPER futures account, or changes a resting entry's size (needs the second production set). Nothing is sent to a broker. Send price, quantity, or both: all of it changes or none does. On a stop-limit, price is its limit and stopPrice its trigger. A bigger size is checked like a new order and loses its place in line; a smaller one keeps it; the stop and target follow. A test order's price can't be moved, but test: true can rehearse a size change. Read the order with nexus_futures_order first and confirm the change with the user.",
+      "inputSchema": {
+        "type": "object",
+        "properties": {
+          "account": { "type": "string", "default": "practice", "description": "practice, agent (the user's bot account), evaluation, funded, or an account id." },
+          "orderId": { "type": "string", "format": "uuid", "description": "The order's id." },
+          "price": { "type": "number", "exclusiveMinimum": 0, "description": "The order's new price." },
+          "quantity": { "type": "integer", "minimum": 1, "maximum": 100, "x-requires": "second-prod-set", "description": "A resting entry's new size, 1 to 100. To take it all off, cancel instead." },
+          "stopPrice": { "type": "number", "exclusiveMinimum": 0, "x-requires": "second-prod-set", "description": "A stop-limit's new trigger, until a trade reaches it." },
+          "test": { "type": "boolean", "x-requires": "second-prod-set", "description": "Optional. The order decides: on a test order only a size change can be rehearsed." }
+        },
+        "required": ["account", "orderId"],
+        "additionalProperties": false
+      }
+    },
+    {
+      "name": "nexus_futures_cancel_orders",
+      "title": "Cancel resting Nexus futures orders",
+      "section": "Futures resting orders",
+      "endpoint": "POST /api/nexus/v1/trading/accounts/{account}/orders/cancel",
+      "operationId": "cancelAllFuturesOrders",
+      "annotations": { "readOnlyHint": false, "destructiveHint": true, "idempotentHint": true, "openWorldHint": false },
+      "description": "Cancels every resting order on the user's Nexus PAPER futures account, or just one contract's orders. Nothing is sent to a broker. Send cancelAll: true or ticker, not both. With test: true it cancels the account's test orders in the test log only. Confirm with the user before cancelling real orders.",
+      "inputSchema": {
+        "type": "object",
+        "properties": {
+          "account": { "type": "string", "default": "practice", "description": "practice, agent (the user's bot account), evaluation, funded, or an account id." },
+          "cancelAll": { "type": "boolean", "description": "true cancels every resting order on the account." },
+          "ticker": { "type": "string", "description": "Cancel only this contract's orders, like NQ." },
+          "test": { "type": "boolean", "description": "true cancels the account's test orders in the test log only." }
+        },
+        "required": ["account"],
+        "additionalProperties": false
+      }
+    },
+    {
+      "name": "nexus_wallet",
+      "title": "Read a Nexus paper wallet",
+      "section": "Account and capabilities",
+      "endpoint": "GET /api/nexus/v1/trading/wallets/{book}",
+      "operationId": "getWallet",
+      "annotations": { "readOnlyHint": true, "destructiveHint": false, "idempotentHint": true, "openWorldHint": false },
+      "description": "The user's options and stocks paper wallet (main) or their bot's (agent): cash, buying power, realized P/L and open positions, all in cents. Read only. Size new trades from buyingPowerCents, which is cash minus what resting buys hold back. openMarketValueCents and equityCents are left out when a position hasn't been marked yet.",
+      "inputSchema": {
+        "type": "object",
+        "properties": {
+          "book": { "type": "string", "enum": ["main", "agent"], "description": "main is the user's own paper wallet, agent is their bot's." }
+        },
+        "required": ["book"],
+        "additionalProperties": false
+      }
+    },
+    {
+      "name": "nexus_add_to_trade",
+      "title": "Add to a Nexus paper trade",
+      "section": "Options and stocks",
+      "x-requires": "second-prod-set",
+      "endpoint": "POST /api/nexus/v1/trades/{id}/adds",
+      "operationId": "addToTrade",
+      "annotations": { "readOnlyHint": false, "destructiveHint": true, "idempotentHint": true, "openWorldHint": false },
+      "description": "Buys more of one of the user's open Nexus PAPER options or stock trades at market (options at the live ask, stocks at the live price). Nothing is sent to a broker. The average, totals and P/L update the way they do when the user adds in Nexus, and the trade's wallet pays (an agent trade pays from the agent wallet). Each add is 1 to 1,000 contracts or 1 to 100,000 shares, and the position can't grow past that. An add to a test trade's id is a test add, so rehearse with a test trade first. Confirm with the user before adding to a real trade. Always make up a clientOrderId and reuse it if you retry.",
+      "inputSchema": {
+        "type": "object",
+        "properties": {
+          "id": { "type": "string", "format": "uuid", "description": "The trade's id, from nexus_open_trade, nexus_trades, or the tradeId of a 409 duplicate_position." },
+          "quantity": { "type": "integer", "minimum": 1, "maximum": 100000, "description": "How many more contracts or shares." },
+          "price": { "type": "number", "description": "A fill price the user got elsewhere, taken only inside a small window around the live quote." },
+          "ifOutside": { "type": "string", "enum": ["reject", "market"], "default": "reject", "description": "When price is outside the window: refuse, or fill at market." },
+          "clientOrderId": { "type": "string", "pattern": "^[A-Za-z0-9_.:-]{1,64}$", "description": "Your own id for this add. Reuse the same one on a retry." },
+          "test": { "type": "boolean", "description": "Optional. The trade decides: an add to a test trade is a test add, and true on a real trade adds nothing." }
+        },
+        "required": ["id", "quantity", "clientOrderId"],
+        "additionalProperties": false
+      }
+    },
+    {
+      "name": "nexus_working_orders",
+      "title": "Resting Nexus options and stock orders",
+      "section": "Options and stocks resting orders",
+      "x-requires": "second-prod-set",
+      "endpoint": "GET /api/nexus/v1/trading/wallets/{book}/orders/working",
+      "operationId": "listWalletWorkingOrders",
+      "annotations": { "readOnlyHint": true, "destructiveHint": false, "idempotentHint": true, "openWorldHint": false },
+      "description": "Options and stock orders resting on the user's paper wallet (main) or their bot's (agent), oldest first: limits, stock stops, and options stop-losses and targets. The main wallet also shows orders placed on the Options Desk in Nexus. Read only.",
+      "inputSchema": {
+        "type": "object",
+        "properties": {
+          "book": { "type": "string", "enum": ["main", "agent"], "default": "main", "description": "main is the user's own paper wallet, agent is their bot's." }
+        },
+        "required": ["book"],
+        "additionalProperties": false
+      }
+    },
+    {
+      "name": "nexus_order",
+      "title": "Read a Nexus options or stock order",
+      "section": "Options and stocks resting orders",
+      "x-requires": "second-prod-set",
+      "endpoint": "GET /api/nexus/v1/trading/wallets/{book}/orders/{orderId}",
+      "operationId": "getWalletOrder",
+      "annotations": { "readOnlyHint": true, "destructiveHint": false, "idempotentHint": true, "openWorldHint": false },
+      "description": "One options or stock order on a paper wallet as it stands now, in any status: working, filled, cancelled, rejected or expired. A filled order shows fillPrice and tradeId; a fired options stop shows firedLeg and triggerPrice (the stock price). Read only. Works with a test order's id too.",
+      "inputSchema": {
+        "type": "object",
+        "properties": {
+          "book": { "type": "string", "enum": ["main", "agent"], "default": "main", "description": "main is the user's own paper wallet, agent is their bot's." },
+          "orderId": { "type": "string", "format": "uuid", "description": "The order's id." }
+        },
+        "required": ["book", "orderId"],
+        "additionalProperties": false
+      }
+    },
+    {
+      "name": "nexus_cancel_order",
+      "title": "Cancel a Nexus options or stock order",
+      "section": "Options and stocks resting orders",
+      "x-requires": "second-prod-set",
+      "endpoint": "POST /api/nexus/v1/trading/wallets/{book}/orders/{orderId}/cancel",
+      "operationId": "cancelWalletOrder",
+      "annotations": { "readOnlyHint": false, "destructiveHint": true, "idempotentHint": true, "openWorldHint": false },
+      "description": "Cancels one resting order on the user's Nexus PAPER wallet and gives back the buying power it held. Nothing is sent to a broker. Safe to send twice. A stop that's already been set off is filling and can't be cancelled (409 stop_triggered). A test order's id cancels it in the test log only. Confirm with the user before cancelling a real order.",
+      "inputSchema": {
+        "type": "object",
+        "properties": {
+          "book": { "type": "string", "enum": ["main", "agent"], "default": "main", "description": "main is the user's own paper wallet, agent is their bot's." },
+          "orderId": { "type": "string", "format": "uuid", "description": "The order's id." },
+          "test": { "type": "boolean", "description": "Optional. true only ever acts on a test order in the test log." }
+        },
+        "required": ["book", "orderId"],
+        "additionalProperties": false
+      }
+    },
+    {
+      "name": "nexus_modify_order",
+      "title": "Change a Nexus options or stock order",
+      "section": "Options and stocks resting orders",
+      "x-requires": "second-prod-set",
+      "endpoint": "POST /api/nexus/v1/trading/wallets/{book}/orders/{orderId}/modify",
+      "operationId": "modifyWalletOrder",
+      "annotations": { "readOnlyHint": false, "destructiveHint": true, "idempotentHint": true, "openWorldHint": false },
+      "description": "Changes one resting order on the user's Nexus PAPER wallet in place. Nothing is sent to a broker. A limit takes price (the new limit) and quantity. A stock stop takes price (the new stop). An options stop takes stopLoss and takeProfit (STOCK prices), quantity, or price when it has only one level. A bigger buy has to fit buying power, and a buy moved above the ask fills right away. Test orders can't be modified, so there's no test mode here. Read the order with nexus_order first and confirm the change with the user.",
+      "inputSchema": {
+        "type": "object",
+        "properties": {
+          "book": { "type": "string", "enum": ["main", "agent"], "default": "main", "description": "main is the user's own paper wallet, agent is their bot's." },
+          "orderId": { "type": "string", "format": "uuid", "description": "The order's id." },
+          "price": { "type": "number", "exclusiveMinimum": 0, "description": "The new limit, or the new stop on a stock stop or a one-level options stop. In cents." },
+          "quantity": { "type": "integer", "minimum": 1, "maximum": 100000, "description": "The new size: up to 1,000 contracts or 100,000 shares." },
+          "stopLoss": { "type": "number", "exclusiveMinimum": 0, "description": "Options stops: the new stock price the stop fires at." },
+          "takeProfit": { "type": "number", "exclusiveMinimum": 0, "description": "Options stops: the new stock price the target fires at." }
+        },
+        "required": ["book", "orderId"],
+        "additionalProperties": false
+      }
+    },
+    {
+      "name": "nexus_cancel_orders",
+      "title": "Cancel resting Nexus options and stock orders",
+      "section": "Options and stocks resting orders",
+      "x-requires": "second-prod-set",
+      "endpoint": "POST /api/nexus/v1/trading/wallets/{book}/orders/cancel",
+      "operationId": "cancelAllWalletOrders",
+      "annotations": { "readOnlyHint": false, "destructiveHint": true, "idempotentHint": true, "openWorldHint": false },
+      "description": "Cancels every resting order on the user's Nexus PAPER wallet, options stops included, or just one underlying's orders. Nothing is sent to a broker, and nothing is closed: positions stay open. Send cancelAll: true or ticker, not both. Stops that are already filling are skipped and listed in meta.stopsFilling. With test: true it cancels the wallet's test orders in the test log only. Confirm with the user before cancelling real orders.",
+      "inputSchema": {
+        "type": "object",
+        "properties": {
+          "book": { "type": "string", "enum": ["main", "agent"], "default": "main", "description": "main is the user's own paper wallet, agent is their bot's." },
+          "cancelAll": { "type": "boolean", "description": "true cancels every resting order on the wallet." },
+          "ticker": { "type": "string", "description": "Cancel only this underlying's orders, like SPY." },
+          "test": { "type": "boolean", "description": "true cancels the wallet's test orders in the test log only." }
+        },
+        "required": ["book"],
+        "additionalProperties": false
+      }
+    }
+  ]
+}

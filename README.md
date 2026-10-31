@@ -5,7 +5,8 @@
 Skylit is the data intelligence platform for AI trading: options flow,
 volatility, dealer positioning and dark pool data for US markets.
 The Skylit MCP server gives any MCP client (Claude, ChatGPT, Cursor, VS Code,
-Gemini CLI, Codex and others) read-only tools over that data.
+Gemini CLI, Codex and others) read-only tools over that data. A separate,
+opt-in tool list lets your assistant trade your [Nexus paper accounts](#nexus-paper-trading).
 
 This repository holds setup guides for each client, the Claude Code plugin, a
 Gemini CLI extension, an agent skill, and runnable examples. It contains no
@@ -75,7 +76,7 @@ Source and docs: [packages/typescript](packages/typescript).
 
 ## Staying current
 
-This repo is checked against the live API every 6 hours (`scripts/sync.py`, [sync workflow](.github/workflows/sync.yml)): the tool catalog and REST specs in [reference/](reference/) are refreshed from Skylit's published docs, and any guide, skill, example or SDK that names a tool or endpoint that no longer exists fails the check and opens an issue.
+This repo is checked against the live API every 6 hours (`scripts/sync.py`, [sync workflow](.github/workflows/sync.yml)): the tool catalog and REST specs in [reference/](reference/) are refreshed from Skylit's published docs, and any guide, skill, example or SDK that names a tool or endpoint that no longer exists fails the check and opens an issue. The Nexus Trades API spec and its tool definitions are kept by hand; the same check fails when a tool and the spec disagree, or when a production route has no tool.
 
 ## Clients
 
@@ -119,6 +120,59 @@ https://mcp.skylit.ai/mcp?toolset=intelligence
 | `flow_context` | Today's options flow read for a ticker | 9 |
 
 Details: [Intelligence tools](https://www.skylit.ai/docs/mcp/intelligence?utm_source=github&utm_medium=developer&utm_campaign=api_distribution&utm_content=readme).
+
+## Nexus paper trading
+
+Let your AI assistant or agent trade your Nexus paper accounts: options and
+stocks in your paper wallet, futures in your practice account or an evaluation
+or funded account. It runs on the Nexus Trades API with the same Skylit key, so
+every order gets the same checks, live prices and account rules as one you
+place by hand in Nexus. Nothing is ever sent to a broker.
+
+The trading tools have their own list, so an assistant only sees them when you
+add this URL:
+
+```
+https://mcp.skylit.ai/mcp?toolset=trading
+```
+
+| Tool | What it does |
+| --- | --- |
+| `nexus_capabilities` | What your key can trade right now. Call it first |
+| `nexus_wallet` | Your paper wallet's cash and buying power, or your bot's (`agent`) |
+| `nexus_trades`, `nexus_trade` | Read your options and stock trades |
+| `nexus_open_trade` | Open a paper trade: options, stocks, or futures (market, limit, stop and brackets) |
+| `nexus_exit_trade` | Trim or close an options or stock trade |
+| `nexus_futures_account`, `nexus_futures_orders` | A futures account and its order history |
+| `nexus_futures_close` | Close one futures position or flatten the account |
+| `nexus_futures_working_orders`, `nexus_futures_order` | What's resting, or one order |
+| `nexus_futures_cancel_order`, `nexus_futures_cancel_orders`, `nexus_futures_modify_order` | Cancel one or all resting orders, or move one's price |
+| `nexus_add_to_trade` | Add to an open options or stock trade (coming soon) |
+| `nexus_working_orders`, `nexus_order`, `nexus_modify_order`, `nexus_cancel_order`, `nexus_cancel_orders` | Options limits, stock limits and stops, and options stop-losses resting on your wallet (coming soon) |
+
+Add `"account": "agent"` to any order to trade your bot's own practice account,
+which never counts anywhere public. Options and stock limits and stops, options
+stop-losses on the stock's price, futures stop-limit and size changes, and adds
+are coming soon: `nexus_capabilities` lists them once your key has them.
+
+The Trades API's live stream of your own fills, orders and accounts (Server-Sent Events, coming soon) isn't an MCP tool, since MCP calls are request and response: open it from your own bot with the same key, as the Nexus Trades API docs show.
+
+Built so an AI can't fat-finger your account:
+
+- **Test first.** `test: true` checks and prices an order like a real one, then
+  keeps it in your test log. It never touches your wallet or account.
+  `nexus_open_trade` makes the assistant pick `test` on every call.
+- **Safe retries.** Opens, exits and closes need a `clientOrderId`. A retry with
+  the same one gets the first order back, never a second fill.
+- **Flagged as writes.** Only the read tools are marked read-only, so your
+  client asks you before each order.
+- **Real orders count.** A real order shows in your trades, stats and ranks like
+  any other, and people who copy your trades get it unless the trade is private.
+
+Tool definitions: [reference/nexus-trades-tools.json](reference/nexus-trades-tools.json).
+API spec: [reference/openapi/nexus-trades.json](reference/openapi/nexus-trades.json).
+The Python and TypeScript SDKs have the same calls (`open_trade` / `openTrade`
+and so on).
 
 ## Tools
 

@@ -2,7 +2,7 @@
 
 A TypeScript client for [Skylit](https://www.skylit.ai/?utm_source=npm&utm_medium=developer&utm_campaign=api_distribution&utm_content=packages-typescript-readme) market data. Skylit covers options flow, volatility, dealer positioning (GEX/vanna levels and point-in-time replay) and dark pool, and is built for AI trading agents and the people who build them.
 
-It is typed, has no dependencies, and runs on Node 18+, Bun, Deno and edge runtimes. Every call is read-only: it fetches data and never places orders.
+It is typed, has no dependencies, and runs on Node 18+, Bun, Deno and edge runtimes. Market data calls are read-only. The Nexus trading calls place paper trades on your own Nexus account and never reach a broker (see below).
 
 ```bash
 npm install @skylitai/sdk
@@ -23,6 +23,26 @@ await skylit.get("/v1/vol/screener", { limit: 20 });   // any documented endpoin
 ```
 
 Responses are the API's JSON, `{ data, meta }`. `meta` carries the remaining credits and the rate-limit state. Errors throw `SkylitError` with `status`, `code` and `message`. Failed calls are not charged.
+
+## Nexus paper trading
+
+The same key trades your Nexus paper accounts through the Nexus Trades API: options and stocks in your paper wallet, futures in your practice, evaluation or funded account. The server prices every fill from the live market and runs the same account rules as Nexus. Order bodies use the API's field names.
+
+```ts
+await skylit.tradingCapabilities();                    // what this key can trade right now
+
+await skylit.openTrade({ contract: "SPY 600C 10/16", quantity: 1, clientOrderId: "spy-call-1", test: true }); // rehearse first
+await skylit.trades({ status: "open" });               // your open options and stock trades
+await skylit.exitTrade(tradeId, { quantity: 1, clientOrderId: "spy-call-1-trim" });
+
+await skylit.openTrade({ assetClass: "futures", ticker: "NQ", side: "buy", quantity: 1, clientOrderId: "nq-1", test: true });
+await skylit.futuresAccount("practice");               // balance, positions, loss rules
+await skylit.closeFutures("practice", { ticker: "NQ", clientOrderId: "nq-1-close", test: true });
+```
+
+- `test: true` checks and prices an order like a real one, then keeps it in your test log instead of placing it.
+- Send a `clientOrderId` you make up and reuse it if you retry: you get the first order back and nothing new is placed.
+- Futures resting orders: `futuresWorkingOrders`, `futuresOrder`, `cancelFuturesOrder`, `cancelFuturesOrders`, `modifyFuturesOrder`. History: `futuresOrders`.
 
 ## Agents
 
