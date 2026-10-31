@@ -122,10 +122,13 @@ info:
       session (no `10m` before 09:40). At an equity's close the last frame is
       held until the next open with `final: true`.
     - **Movers** are the top 10 risers (magnitude growing) and top 10 fallers
-      per timeframe among nodes that moved at least 0.5%, ranked by size of
-      change. By default they rank over the **nearest 5 expirations** (the
-      app's view); per-node velocity exists for every expiration Skylit
-      stores (`expirations`).
+      per timeframe among nodes that moved at least 0.5%, ranked by how much
+      the size changed in dollars (`||now| - |then||`). No minimum size
+      applies, and every mover carries its percent. Strikes that appeared
+      from zero or went to zero are listed separately in `new` and `closed`
+      (see `VelocityMovers`). By default they rank over the **nearest 5
+      expirations** (the app's view); per-node velocity exists for every
+      expiration Skylit stores (`expirations`).
     - **Strike window.** Velocity covers the symbol's display window of
       strikes around spot (92 by default), re-centred on spot every second.
       On a trending day a strike can enter the window after a lookback's
@@ -1749,7 +1752,7 @@ components:
           additionalProperties: { type: number }
         pct:
           type: object
-          description: Per timeframe, `(|now| - |then|) / |then| x 100`. Absent when unknown, and (when the velocity rule's floor is on) when `|then|` is below the floor ($100K gamma, $500K vanna), since a percentage of a sub-floor base is not shown; `delta` is still given.
+          description: Per timeframe, `(|now| - |then|) / |then| x 100`. Absent when unknown. Only while a mover floor is applied (none is at present) is it also absent when `|then|` is below that floor ($100K gamma, $500K vanna); `delta` is still given.
           additionalProperties: { type: number }
     VelocityAnchor:
       type: object
@@ -1766,11 +1769,11 @@ components:
         new:
           type: array
           items: { $ref: "#/components/schemas/NodeVelocity" }
-          description: "Additive. NEW positions: strikes whose exposure rose to at least the floor ($100K gamma, $500K vanna) since the lookback, from zero or from below the floor, top 10 by how much the size changed. The timeframe's delta is now minus then and its percent is 0 (never a percentage of a sub-floor base). Absent when the server does not compute positions; [] when there are none."
+          description: "Additive. NEW positions: strikes with no exposure at the lookback that now hold at least $100K (gamma) or $500K (vanna), top 10 by size now. Only strikes the lookback covered: a strike that entered the strike window because spot moved, or a new expiration, is not NEW. In this list's own timeframe, delta is the exposure now (from zero) and the percent is 0; the other timeframes are filled as for movers. Only while a mover floor is applied (none is at present) does a strike that rises from below that floor to at least it also count, with delta now minus then and percent 0. Absent when the server does not compute positions; [] when there are none."
         closed:
           type: array
           items: { $ref: "#/components/schemas/NodeVelocity" }
-          description: "Additive. CLOSED positions: strikes whose exposure fell from at least the floor ($100K gamma, $500K vanna) to zero or to below the floor since the lookback, top 10 by how much the size changed. currentValue is the current exposure (0 when it went to zero); the timeframe's delta and percent are the real change from the above-floor value (-100% to zero). Absent when the server does not compute positions."
+          description: "Additive. CLOSED positions: strikes that held at least $100K (gamma) or $500K (vanna) at the lookback and now hold none, top 10 by size then. Only strikes still in the strike window on an expiration still ranked: an expired expiration, or a strike that left the window, is not CLOSED. currentValue is 0, and in this list's own timeframe delta is minus the exposure then and the percent is -100; the other timeframes are filled as for movers. Only while a mover floor is applied (none is at present) does a strike that falls from at least that floor to below it also count; currentValue is then the exposure now, and delta and percent are the real change. Absent when the server does not compute positions."
     VelocityHalo:
       type: object
       description: Per-strike direction per timeframe. `strikes[i]` corresponds to character i of each vector.
@@ -2124,7 +2127,7 @@ components:
         belowFloor:
           type: array
           items: { type: string }
-          description: "Additive. Timeframes (\"1m\"..\"1d\") whose base was below the mover floor ($100K gamma, $500K vanna). Their percent is withheld and reads 0 (not a real no-change); the delta is kept. Absent when nothing is withheld."
+          description: "Additive. Timeframes (\"1m\"..\"1d\") whose base was below the mover floor ($100K gamma, $500K vanna), sent only while a mover floor is applied (none is at present). Their percent is withheld and reads 0 (not a real no-change); the delta is kept. Absent when nothing is withheld."
     StreamResumed:
       description: /v1/stream v2 `resumed` event payload.
       type: object
