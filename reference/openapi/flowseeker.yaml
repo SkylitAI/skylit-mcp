@@ -182,6 +182,14 @@ tags:
       ranked by distinct members trading them. Amounts are the filed dollar
       brackets, never point values. Windows are on the disclosure date (when
       a trade became public). Coverage starts August 2024.
+  - name: Earnings
+    description: |
+      Company earnings reports: one ticker's report history and next
+      scheduled date, with EPS and revenue against the analyst estimate,
+      and a market-wide calendar over a date window. Report times are
+      `bmo` (before the open) or `amc` (after the close); an `amc` report
+      moves the next session. Dates and estimates are refreshed once a
+      weekday.
   - name: Meta
     description: API metadata (this OpenAPI document, etc.).
 
@@ -3845,6 +3853,124 @@ paths:
         "503": { $ref: "#/components/responses/Unavailable" }
         "504": { $ref: "#/components/responses/GatewayTimeout" }
 
+  /v1/underlying/{ticker}/earnings:
+    get:
+      summary: One ticker's earnings reports
+      operationId: getUnderlyingEarnings
+      x-credits: 1
+      tags: [Earnings]
+      description: |
+        `{ticker}`'s earnings reports in the window, newest first, including
+        scheduled ones, plus `nextReport`: the soonest report dated today or
+        later that has not reported yet. Defaults to all history through 400
+        days ahead. A report whose date was moved appears once, on its
+        current date. Share classes accept `BRK.B`, `BRK-B` or `BRKB`.
+      parameters:
+        - $ref: "#/components/parameters/Ticker"
+        - name: date_start
+          in: query
+          required: false
+          description: Inclusive start on the report date (`YYYY-MM-DD`). Defaults to all history.
+          schema: { type: string, format: date }
+        - name: date_end
+          in: query
+          required: false
+          description: Inclusive end (`YYYY-MM-DD`). Defaults to 400 days after today (ET).
+          schema: { type: string, format: date }
+        - name: limit
+          in: query
+          required: false
+          description: Reports returned, newest first.
+          schema: { type: integer, default: 40, minimum: 1, maximum: 400 }
+      responses:
+        "200":
+          description: Next scheduled report and report history for `{ticker}`.
+          content:
+            application/json:
+              schema: { $ref: "#/components/schemas/EarningsTickerSuccess" }
+        "400": { $ref: "#/components/responses/BadRequest" }
+        "401": { $ref: "#/components/responses/Unauthorized" }
+        "403": { $ref: "#/components/responses/Forbidden" }
+        "404": { $ref: "#/components/responses/NotFound" }
+        "402": { $ref: "#/components/responses/InsufficientCredits" }
+        "429": { $ref: "#/components/responses/RateLimited" }
+        "500": { $ref: "#/components/responses/InternalError" }
+        "503": { $ref: "#/components/responses/Unavailable" }
+        "504": { $ref: "#/components/responses/GatewayTimeout" }
+
+  /v1/earnings/calendar:
+    get:
+      summary: Earnings reports across tickers in a date window
+      operationId: getEarningsCalendar
+      x-credits: 1
+      tags: [Earnings]
+      description: |
+        Every earnings report dated in the window, past or scheduled. Defaults
+        to the 7 days from today; windows span at most 31 days. `sort=premium`
+        (default) puts the most actively traded names first by `premium20d`;
+        `sort=date` lists the window chronologically, before-open reports
+        ahead of after-close ones each day. Use `covered_only=true` to drop
+        names without an analyst estimate (mostly micro-caps whose date is a
+        placeholder). Page with `offset`.
+      parameters:
+        - name: date_start
+          in: query
+          required: false
+          description: Inclusive start on the report date (`YYYY-MM-DD`). Defaults to today (ET).
+          schema: { type: string, format: date }
+        - name: date_end
+          in: query
+          required: false
+          description: Inclusive end (`YYYY-MM-DD`). Defaults to 6 days after `date_start`. Max span 31 days.
+          schema: { type: string, format: date }
+        - name: tickers
+          in: query
+          required: false
+          description: Comma-separated tickers (max 50). Omit for every ticker.
+          schema: { type: string, example: "NVDA,AAPL" }
+        - name: report_time
+          in: query
+          required: false
+          description: "`unknown` keeps reports with no published time."
+          schema: { type: string, enum: [bmo, amc, unknown] }
+        - name: covered_only
+          in: query
+          required: false
+          description: Only reports carrying an analyst EPS estimate.
+          schema: { type: boolean, default: false }
+        - name: min_premium
+          in: query
+          required: false
+          description: Minimum `premium20d` (USD, total over 20 sessions), e.g. `10000000`.
+          schema: { type: number, minimum: 0 }
+        - name: sort
+          in: query
+          required: false
+          schema: { type: string, enum: [premium, date], default: premium }
+        - name: limit
+          in: query
+          required: false
+          schema: { type: integer, default: 250, minimum: 1, maximum: 1000 }
+        - name: offset
+          in: query
+          required: false
+          schema: { type: integer, default: 0, minimum: 0, maximum: 10000 }
+      responses:
+        "200":
+          description: Reports in the window.
+          content:
+            application/json:
+              schema: { $ref: "#/components/schemas/EarningsCalendarSuccess" }
+        "400": { $ref: "#/components/responses/BadRequest" }
+        "401": { $ref: "#/components/responses/Unauthorized" }
+        "403": { $ref: "#/components/responses/Forbidden" }
+        "404": { $ref: "#/components/responses/NotFound" }
+        "402": { $ref: "#/components/responses/InsufficientCredits" }
+        "429": { $ref: "#/components/responses/RateLimited" }
+        "500": { $ref: "#/components/responses/InternalError" }
+        "503": { $ref: "#/components/responses/Unavailable" }
+        "504": { $ref: "#/components/responses/GatewayTimeout" }
+
   /v1/openapi.json:
     get:
       summary: This OpenAPI specification, as JSON
@@ -6929,6 +7055,104 @@ components:
                 rankedBy: { type: string, description: "What the ranking counts, e.g. `distinct members buying`." }
                 totalNames: { type: integer, description: Tickers meeting the filter before `limit`. }
                 count: { type: integer }
+
+    EarningsReport:
+      type: object
+      description: One earnings report. Actuals and surprises are `null` until the company reports.
+      required:
+        [ticker, date, reportTime, confirmed, fiscalPeriod, fiscalYear, periodEnding, epsEstimated, epsActual,
+         epsSurprise, epsSurprisePct, revenueEstimated, revenueActual, revenueSurprise, revenueSurprisePct]
+      properties:
+        ticker: { type: string, description: "Share classes use a dot, e.g. `BRK.B`." }
+        date: { type: string, format: date, description: The announcement date. }
+        reportTime:
+          type: [string, "null"]
+          enum: [bmo, amc, null]
+          description: "`bmo` before the open, `amc` after the close (moves the next session); `null` when not published."
+        confirmed:
+          type: [boolean, "null"]
+          description: "`true` when the company announced the date, `false` when it is an estimate; `null` when not recorded."
+        fiscalPeriod:
+          type: [string, "null"]
+          description: "`Q1`..`Q4` or `FY`, on the company's fiscal calendar."
+        fiscalYear: { type: [integer, "null"] }
+        periodEnding:
+          type: [string, "null"]
+          format: date
+          description: Last day of the quarter reported on.
+        epsEstimated: { type: [number, "null"], format: double, description: Consensus EPS estimate; `null` without analyst coverage. }
+        epsActual: { type: [number, "null"], format: double }
+        epsSurprise: { type: [number, "null"], format: double, description: "`epsActual - epsEstimated`." }
+        epsSurprisePct:
+          type: [number, "null"]
+          format: double
+          description: "`epsSurprise / |epsEstimated| × 100`; `null` when the estimate is 0."
+        revenueEstimated: { type: [number, "null"], format: double, description: USD. }
+        revenueActual: { type: [number, "null"], format: double, description: USD. }
+        revenueSurprise: { type: [number, "null"], format: double }
+        revenueSurprisePct: { type: [number, "null"], format: double }
+
+    EarningsTickerSuccess:
+      type: object
+      required: [data, meta]
+      properties:
+        data:
+          type: object
+          required: [nextReport, reports]
+          properties:
+            nextReport:
+              description: The soonest report dated today or later without an actual; `null` when none is scheduled in the window.
+              oneOf:
+                - $ref: "#/components/schemas/EarningsReport"
+                - type: "null"
+            reports:
+              type: array
+              description: Newest first, scheduled reports included.
+              items: { $ref: "#/components/schemas/EarningsReport" }
+        meta:
+          allOf:
+            - $ref: "#/components/schemas/Meta"
+            - type: object
+              required: [ticker, dateStart, dateEnd, limit, count, hasMore]
+              properties:
+                ticker: { type: string }
+                dateStart: { type: string, format: date }
+                dateEnd: { type: string, format: date }
+                limit: { type: integer }
+                count: { type: integer }
+                hasMore: { type: boolean, description: "`true` when `reports` is a full page (`count == limit`)." }
+
+    EarningsCalendarEntry:
+      allOf:
+        - $ref: "#/components/schemas/EarningsReport"
+        - type: object
+          required: [premium20d]
+          properties:
+            premium20d:
+              type: [number, "null"]
+              format: double
+              description: Total options premium (USD) traded in the name over the trailing 20 sessions; `null` when none.
+
+    EarningsCalendarSuccess:
+      type: object
+      required: [data, meta]
+      properties:
+        data:
+          type: array
+          items: { $ref: "#/components/schemas/EarningsCalendarEntry" }
+        meta:
+          allOf:
+            - $ref: "#/components/schemas/Meta"
+            - type: object
+              required: [dateStart, dateEnd, sort, limit, offset, count, hasMore]
+              properties:
+                dateStart: { type: string, format: date }
+                dateEnd: { type: string, format: date }
+                sort: { type: string, enum: [premium, date] }
+                limit: { type: integer }
+                offset: { type: integer }
+                count: { type: integer }
+                hasMore: { type: boolean, description: "`true` when the page is full (`count == limit`)." }
 
   responses:
     BadRequest:
