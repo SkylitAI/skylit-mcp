@@ -30,6 +30,9 @@ jobs:
       - name: Refresh from the live docs
         if: github.event_name != 'pull_request'
         run: python3 scripts/sync.py || echo "DRIFT=1" >> "$GITHUB_ENV"
+      - name: Test the checker (pull requests)
+        if: github.event_name == 'pull_request'
+        run: python3 -m unittest discover -s scripts -p "test_*.py"
       - name: Check references (pull requests)
         if: github.event_name == 'pull_request'
         run: python3 scripts/sync.py --check

@@ -7,10 +7,12 @@
     client.get("/v1/chain-bull-bear/SPY")  # any documented endpoint
 
 Agents can also connect to the hosted MCP server at ``MCP_URL``.
-Read-only: the API serves data and never places orders.
+Market data is read-only. The Nexus trading methods (``open_trade``,
+``exit_trade``, ``close_futures`` and friends) place PAPER trades on your own
+Nexus account and never reach a broker.
 """
 
-from .client import API_URL, MCP_URL, Skylit, SkylitError
+from .client import API_URL, MCP_URL, TRADES_URL, Skylit, SkylitError
 
-__all__ = ["Skylit", "SkylitError", "API_URL", "MCP_URL"]
+__all__ = ["Skylit", "SkylitError", "API_URL", "MCP_URL", "TRADES_URL"]
 __version__ = "0.1.2"
