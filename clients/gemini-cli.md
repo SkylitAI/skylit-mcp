@@ -12,7 +12,8 @@ context file. On first use, run `/mcp auth skylit` if the CLI doesn't prompt you
 ## Settings file
 
 Add the server to `~/.gemini/settings.json` (user) or `.gemini/settings.json`
-(project). Use `httpUrl`: in Gemini CLI, `url` means the older SSE transport.
+(project). Use `httpUrl`: it picks the streamable HTTP transport in every
+Gemini CLI version, while older versions read a plain `url` as the SSE transport.
 
 Sign in with Skylit:
 
@@ -29,7 +30,8 @@ Skylit consent page. You can also run `/mcp auth skylit`.
 
 API key:
 
-<!-- unverified: Gemini CLI's docs describe $VAR expansion for `env`; expansion in `headers` is implemented in the CLI source and used by Google's own github-mcp-server extension, but not stated in the docs. -->
+Gemini CLI fills in `$VAR` and `${VAR}` from your environment across the whole
+settings file, `headers` included, so the key stays out of the file.
 
 ```json
 {
@@ -51,6 +53,8 @@ gemini mcp add --transport http -s user \
   -H "Authorization: Bearer $SKYLIT_API_KEY" skylit https://mcp.skylit.ai/mcp
 ```
 
-Sources, checked 2026-09-30:
+Sources, checked 2026-10-24 against Gemini CLI v0.65.0:
 - https://geminicli.com/docs/tools/mcp-server
 - https://geminicli.com/docs/extensions/reference
+- https://github.com/google-gemini/gemini-cli/blob/v0.65.0/packages/cli/src/config/settings.ts (environment expansion)
+- https://github.com/google-gemini/gemini-cli/blob/v0.65.0/packages/core/src/tools/mcp-client.ts (transport choice)
