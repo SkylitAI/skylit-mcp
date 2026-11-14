@@ -35,12 +35,19 @@ info:
     | `/v1/openapi.json` | 0 |
     | `/v1/stream/bars` | 1 per symbol to connect, then 1 per symbol per minute open |
 
-    New customers are seeded with 5,000 credits. Every chargeable response
-    carries `X-Credits-Remaining: <balance>`. Out of credits → `402`
+    New customers are seeded with 5,000 credits. Out of credits → `402`
     `insufficient_credits`; a suspended account → `403`
     `account_suspended`. `/v1/config` and `/v1/time` are free metadata calls.
-    **Failed calls are free:** a request answered with any `4xx` or `5xx` is
-    refunded, and its `X-Credits-Remaining` already reflects the refund.
+    **Failed calls are free.** Some requests are refused BEFORE metering and
+    never touch the balance: a missing or invalid parameter (`400`
+    `invalid_parameter`), an unknown symbol (`404` `symbol_not_found`), a plan
+    or entitlement refusal (`403` `not_entitled`, `403` `account_blocked`,
+    `402` `daily_cap_reached`), an operator pause (`503` `api_paused`) and too
+    many requests in flight (`429` `too_many_concurrent_requests`). Those
+    responses carry **no** `X-Credits-Remaining`. A request that reached
+    metering carries `X-Credits-Remaining: <balance>`; if it then fails with
+    any `4xx` or `5xx` it is refunded, and that header already reflects the
+    refund. An unknown `/v1` path is `404` `not_found`.
 
     Note that a charting client fetches `/v1/history` in **pages** (it walks the
     `to` cursor backward to fill the requested range), so a deep history pull
@@ -52,11 +59,11 @@ info:
     not by the resolution itself. `240` and `60` share the 1-hour tier and
     therefore share its allowance.
 
-    | Tier   | Resolutions                | Max trading days / request |
-    |--------|----------------------------|---------------------------:|
-    | 1-min  | `1` `2` `3` `5` `15` `30`  |                         90 |
-    | 1-hour | `60` `240` `480`           |                        720 |
-    | 1-day  | `D` `W`                    |                      2,600 |
+    | Tier   | Resolutions                             | Max trading days / request |
+    |--------|-----------------------------------------|---------------------------:|
+    | 1-min  | `1` `2` `3` `5` `10` `15` `30` `45`     |                         90 |
+    | 1-hour | `60` `120` `240` `480`                  |                        720 |
+    | 1-day  | `D` `W`                                 |                      2,600 |
 
     A window **wider than the cap is rejected with `400`**, carrying the two
     numbers a client needs to react (`requested_days`, `max_days`). It is never
@@ -64,8 +71,9 @@ info:
     there, never that your range was clipped. Page through anything wider in
     windows of `max_days` or fewer.
 
-    A rejected `400` is refunded, like every failed call (any `4xx` or `5xx`):
-    its `X-Credits-Remaining` already shows the refund. The caps are fixed and
+    A rejected `400` is refunded, like every failed call (any `4xx` or `5xx`
+    that reached metering): its `X-Credits-Remaining` already shows the refund.
+    The caps are fixed and
     published above, so check your range before sending it rather than
     discovering the limit by retrying.
 
@@ -128,11 +136,11 @@ paths:
         bar tier the resolution reads from — not by the resolution itself. `240`
         and `60` share the 1-hour tier and therefore share its allowance.
 
-        | Tier   | Resolutions                | Max trading days / request |
-        |--------|----------------------------|---------------------------:|
-        | 1-min  | `1` `2` `3` `5` `15` `30`  |                         90 |
-        | 1-hour | `60` `240` `480`           |                        720 |
-        | 1-day  | `D` `W`                    |                      2,600 |
+        | Tier   | Resolutions                             | Max trading days / request |
+        |--------|-----------------------------------------|---------------------------:|
+        | 1-min  | `1` `2` `3` `5` `10` `15` `30` `45`     |                         90 |
+        | 1-hour | `60` `120` `240` `480`                  |                        720 |
+        | 1-day  | `D` `W`                                 |                      2,600 |
 
         A window **wider than the cap is rejected with `400`**, carrying the two
         numbers a client needs to react (`requested_days`, `max_days`). It is
@@ -154,17 +162,29 @@ paths:
           in: query
           required: true
           description: |
-            Bar size. Intraday minutes or `D`/`W`. With `extended=false`, the
-            1-hour tier (`60`, `240`, `480`) is built from regular-session hours
-            aligned to the 09:30 ET open: 09:30, 10:30 … 15:30 ET on a full
-            session, the last one covering 15:30–16:00. Each hour is the fold of
-            the `resolution=1` minute bars in its window. The server does not
-            aggregate above one hour: `240` and `480` return the same hourly bars
-            as `60`, so a caller grouping them into 4-hour bars anchors at
-            09:30 ET (09:30, 13:30).
+            Bar size: intraday minutes, `D` (one day) or `W` (one week). Each
+            bar is one candle of that size, built server-side; `1D` and `1W`
+            are accepted as `D` and `W`. Any other value is a `400`
+            (`invalid_parameter`).
+
+            Anchoring. With `extended=false` (the default) intraday bars anchor
+            at the 09:30 ET open and cover regular hours only: `5` → 09:30,
+            09:35 …; `45` → 09:30, 10:15 …; `60` → 09:30, 10:30 … 15:30 (the
+            last hour covers 15:30–16:00); `240` → 09:30, 13:30. A bar whose
+            window would run past 16:00 ET ends at 16:00. With `extended=true`
+            intraday bars sit on the clock grid (for example `240` → 00:00,
+            04:00 … UTC). `D` is one session; `W` is one week, stamped Monday
+            00:00 UTC.
+
+            Window. A bar belongs to the request whose `[from, to)` holds its
+            OPEN time `t`, and it is always complete: the bar opening just
+            before `to` includes its rows at and after `to` (if it is the
+            current bar, it is still forming). A bar opening before `from` is
+            not returned. When the window holds no bar but an earlier one
+            exists, the answer is `no_data` with `nextTime`.
           schema:
             type: string
-            enum: ["1", "2", "3", "5", "15", "30", "60", "240", "480", "D", "W"]
+            enum: ["1", "2", "3", "5", "10", "15", "30", "45", "60", "120", "240", "480", "D", "W"]
             example: "D"
         - name: from
           in: query
@@ -180,8 +200,9 @@ paths:
           in: query
           required: false
           description: |
-            When set, return exactly this many bars ending at `to` (takes
-            precedence over `from`, per the UDF spec).
+            Accepted for UDF compatibility and ignored: the response is always
+            the bars of `[from, to)`, however many that is. A TradingView
+            client sends it and pages by moving `from`/`to`, which works as is.
           schema: { type: integer, minimum: 1 }
         - name: extended
           in: query
@@ -233,8 +254,13 @@ paths:
           description: |
             Invalid request: the requested range is wider than the
             resolution's tier allows, or a parameter is missing or invalid
-            (for example an unsupported `resolution`). Refunded, like every
-            failed call.
+            (for example an unsupported `resolution`, a malformed `symbol`, or a
+            `from`/`to` outside the representable range), as `invalid_parameter`.
+            Never charged. A parameter refused before metering (missing or
+            malformed, an unsupported `resolution`, a malformed symbol) carries
+            no `X-Credits-Remaining`; a range refused by the history handler
+            (too wide, or an unusable `from`/`to`) reached metering, was
+            refunded, and carries it.
           headers:
             X-Credits-Remaining: { $ref: "#/components/headers/CreditsRemaining" }
             Cache-Control: { schema: { type: string, example: "no-store" } }
@@ -253,7 +279,16 @@ paths:
                     requested_days: 171
                     max_days: 90
         "404":
-          description: Unknown symbol (`symbol_not_found`). Refunded.
+          description: |
+            Unknown symbol (`symbol_not_found`). Refused before metering: never
+            charged, no `X-Credits-Remaining`.
+          content:
+            application/json:
+              schema: { $ref: "#/components/schemas/HistoryError" }
+        "500":
+          description: |
+            The bars could not be built (`internal_error`). Never a partial or
+            unbuilt answer; retry the request. Refunded.
           content:
             application/json:
               schema: { $ref: "#/components/schemas/HistoryError" }
@@ -261,7 +296,16 @@ paths:
         "402": { $ref: "#/components/responses/InsufficientCredits" }
         "403": { $ref: "#/components/responses/AccountSuspended" }
         "429": { $ref: "#/components/responses/RateLimited" }
-        "503": { $ref: "#/components/responses/Unavailable" }
+        "503":
+          description: |
+            `datafeed_unavailable`: the bar store could not answer (a cache
+            failure, or the server could not read its own clock); retry.
+            Refunded. Also every code of the shared `Unavailable` response
+            (`api_paused`, `credit_check_failed`).
+          content:
+            application/json:
+              schema: { $ref: "#/components/schemas/HistoryError" }
+        "504": { $ref: "#/components/responses/GatewayTimeout" }
 
   /v1/stream/bars:
     get:
@@ -415,8 +459,10 @@ paths:
         - name: limit
           in: query
           required: false
-          description: Max results. Stay within 1–500; out-of-range values are not rejected today, and their behaviour is not guaranteed.
-          schema: { type: integer, default: 25, minimum: 1, maximum: 500 }
+          description: |
+            Max results, default 25. A larger value is served as 500 (one call
+            returns at most 500 rows); `0` returns an empty list.
+          schema: { type: integer, default: 25, minimum: 0, maximum: 500 }
       responses:
         "200":
           description: Matching symbols.
@@ -431,15 +477,19 @@ paths:
               examples:
                 spy:
                   value:
-                    - { symbol: SPY, ticker: SPY, description: "SPDR S&P 500 ETF Trust", exchange: ARCA, type: etf }
+                    - { symbol: SPY, ticker: SPY, description: "SPDR S&P 500 ETF Trust", exchange: ARCA, type: fund }
                     - { symbol: SPX, ticker: SPX, description: "S&P 500 Index", exchange: NASDAQ, type: index }
         "400":
-          description: Missing or invalid parameter (`invalid_parameter`). Refunded.
+          description: |
+            Missing or invalid parameter (`invalid_parameter`). Refused before
+            metering: never charged, no `X-Credits-Remaining`.
           content: { application/json: { schema: { $ref: "#/components/schemas/Error" } } }
         "401": { $ref: "#/components/responses/Unauthorized" }
         "402": { $ref: "#/components/responses/InsufficientCredits" }
         "403": { $ref: "#/components/responses/AccountSuspended" }
         "429": { $ref: "#/components/responses/RateLimited" }
+        "503": { $ref: "#/components/responses/Unavailable" }
+        "504": { $ref: "#/components/responses/GatewayTimeout" }
 
   /v1/symbols:
     get:
@@ -450,9 +500,12 @@ paths:
       description: |
         The TradingView `LibrarySymbolInfo` for one ticker — price scale,
         session, timezone, and supported resolutions the charting library needs
-        before requesting history.
+        before requesting history. `supported_resolutions` and
+        `intraday_multipliers` are the same lists `/v1/config` advertises:
+        `/v1/history` builds every one of them server-side, so request the bar
+        size you want directly.
 
-        `session` is `"0400-2000"` for every symbol. With `/v1/history?extended=false` (the default), hour bars (60/240/480) anchor at 09:30 ET, so resample 2h/4h from 09:30, not from `session`; with `extended=true`, hour bars are clock-aligned.
+        `session` is `"0400-2000"` for every symbol. With `/v1/history?extended=false` (the default), intraday bars anchor at the 09:30 ET open (`240` → 09:30, 13:30), not at `session`; with `extended=true`, they are clock-aligned.
       parameters:
         - $ref: "#/components/parameters/Symbol"
       responses:
@@ -469,7 +522,7 @@ paths:
                     ticker: SPY
                     name: SPY
                     description: "SPDR S&P 500 ETF Trust"
-                    type: etf
+                    type: fund
                     session: "0400-2000"
                     timezone: America/New_York
                     exchange: ARCA
@@ -478,29 +531,47 @@ paths:
                     has_intraday: true
                     has_daily: true
                     has_weekly_and_monthly: true
-                    intraday_multipliers: ["1", "60"]
-                    supported_resolutions: ["1", "2", "3", "5", "15", "30", "60", "240", "480", "D", "W"]
+                    intraday_multipliers: ["1", "2", "3", "5", "10", "15", "30", "45", "60", "120", "240", "480"]
+                    supported_resolutions: ["1", "2", "3", "5", "10", "15", "30", "45", "60", "120", "240", "480", "D", "W"]
                     volume_precision: 0
                     data_status: streaming
                     format: price
         "400":
-          description: Malformed symbol.
+          description: |
+            Missing or malformed symbol (`invalid_parameter`). Refused before
+            metering: never charged, no `X-Credits-Remaining`.
           content:
             application/json:
               schema: { $ref: "#/components/schemas/Error" }
               examples:
-                invalid: { value: { success: false, error: "invalid symbol" } }
+                invalid:
+                  value:
+                    error:
+                      code: invalid_parameter
+                      message: Invalid symbol "BRK/B".
+                      docs_url: https://www.skylit.ai/docs/api-reference/errors#invalid_parameter
         "401": { $ref: "#/components/responses/Unauthorized" }
         "402": { $ref: "#/components/responses/InsufficientCredits" }
         "403": { $ref: "#/components/responses/AccountSuspended" }
         "404":
-          description: Unknown symbol.
+          description: |
+            Unknown symbol (`symbol_not_found`). Refused before metering: never
+            charged, no `X-Credits-Remaining`.
           content:
             application/json:
               schema: { $ref: "#/components/schemas/Error" }
               examples:
-                notFound: { value: { success: false, error: "symbol not found" } }
+                notFound:
+                  value:
+                    error:
+                      code: symbol_not_found
+                      message: >-
+                        Symbol "ZZZZQ" is not available. Find valid symbols with
+                        /v1/search?query=... Nothing was charged.
+                      docs_url: https://www.skylit.ai/docs/api-reference/errors#symbol_not_found
         "429": { $ref: "#/components/responses/RateLimited" }
+        "503": { $ref: "#/components/responses/Unavailable" }
+        "504": { $ref: "#/components/responses/GatewayTimeout" }
 
   /v1/config:
     get:
@@ -541,11 +612,11 @@ paths:
                     supports_marks: false
                     supports_timescale_marks: false
                     supports_time: true
-                    supported_resolutions: ["1", "2", "3", "5", "15", "30", "60", "240", "480", "D", "W"]
+                    supported_resolutions: ["1", "2", "3", "5", "10", "15", "30", "45", "60", "120", "240", "480", "D", "W"]
                     max_fetch_trading_days:
-                      {"1": 90, "2": 90, "3": 90, "5": 90, "15": 90, "30": 90,
-                       "60": 720, "240": 720, "480": 720, "D": 2600, "W": 2600}
-                    intraday_multipliers: ["1", "60"]
+                      {"1": 90, "2": 90, "3": 90, "5": 90, "10": 90, "15": 90, "30": 90, "45": 90,
+                       "60": 720, "120": 720, "240": 720, "480": 720, "D": 2600, "W": 2600}
+                    intraday_multipliers: ["1", "2", "3", "5", "10", "15", "30", "45", "60", "120", "240", "480"]
                     exchanges:
                       - { value: NASDAQ, name: NASDAQ, desc: NASDAQ }
                       - { value: NYSE, name: NYSE, desc: NYSE }
@@ -610,7 +681,7 @@ components:
 
   headers:
     CreditsRemaining:
-      description: Credit balance remaining after this request was debited.
+      description: Credit balance remaining after this request was debited (and refunded, when it failed). Present only on requests that reached metering; a request refused before it (invalid parameter, unknown symbol, plan or entitlement refusal, operator pause, too many requests in flight) carries none.
       schema: { type: integer, example: 4999 }
 
   schemas:
@@ -680,7 +751,7 @@ components:
         ticker: { type: string, description: Display ticker shown in the picker. }
         description: { type: string }
         exchange: { type: string, example: ARCA }
-        type: { type: string, enum: [stock, etf, index] }
+        type: { type: string, enum: [stock, fund, dr, index], description: "fund covers ETFs, ETCs and mutual funds; dr is a depositary receipt." }
         kind: { type: string, description: "Present on indices (`index`); absent otherwise." }
 
     SymbolInfo:
@@ -691,12 +762,12 @@ components:
         ticker: { type: string }
         name: { type: string }
         description: { type: string }
-        type: { type: string, enum: [stock, etf, index] }
+        type: { type: string, enum: [stock, fund, dr, index], description: "fund covers ETFs, ETCs and mutual funds; dr is a depositary receipt." }
         session:
           type: string
           example: "0400-2000"
           description: >-
-            `session` is `"0400-2000"` for every symbol. With `/v1/history?extended=false` (the default), hour bars (60/240/480) anchor at 09:30 ET, so resample 2h/4h from 09:30, not from `session`; with `extended=true`, hour bars are clock-aligned.
+            `session` is `"0400-2000"` for every symbol. With `/v1/history?extended=false` (the default), intraday bars anchor at the 09:30 ET open (`240` → 09:30, 13:30), not at `session`; with `extended=true`, they are clock-aligned.
         timezone: { type: string, example: America/New_York }
         exchange: { type: string, example: ARCA }
         minmov: { type: integer, example: 1 }
@@ -727,7 +798,7 @@ components:
           description: |
             Max trading days one `/v1/history` request may span, keyed by
             resolution. Resolutions sharing a bar tier share a value — `60`,
-            `240` and `480` all read hourly bars and all cap at 720.
+            `120`, `240` and `480` all read hourly bars and all cap at 720.
           additionalProperties: { type: integer }
           example: { "1": 90, "60": 720, "240": 720, "D": 2600 }
         intraday_multipliers: { type: array, items: { type: string } }
@@ -766,40 +837,61 @@ components:
             Link to this code's entry on https://www.skylit.ai/docs/api-reference/errors.
             Optional: read it when present, never require it.
 
-    UdfError:
-      type: object
-      description: Symbol-resolution error (UDF-native shape).
-      required: [success, error]
-      properties:
-        success: { type: boolean, enum: [false] }
-        error: { type: string }
-
   responses:
     Unauthorized:
       description: Missing or invalid API key.
       content: { application/json: { schema: { $ref: "#/components/schemas/Error" } } }
     InsufficientCredits:
-      description: Credit balance is below the request cost.
+      description: |
+        Never charged. One of:
+        - `insufficient_credits`: the balance is below the request cost.
+          Carries `X-Credits-Remaining`.
+        - `monthly_cap_reached`: the account's monthly spend cap is used up;
+          it resets at the start of next month. Carries `X-Credits-Remaining`.
+        - `daily_cap_reached`: the plan's daily credit limit is used up; it
+          resets at midnight ET. Refused before metering, so it carries no
+          `X-Credits-Remaining`; carries `Retry-After` (seconds to the reset).
       headers:
         X-Credits-Remaining: { $ref: "#/components/headers/CreditsRemaining" }
+        Retry-After: { schema: { type: integer } }
       content:
         application/json:
           schema: { $ref: "#/components/schemas/Error" }
           examples:
             outOfCredits: { value: { error: { code: insufficient_credits, message: "Out of credits." } } }
     AccountSuspended:
-      description: >-
-        Unknown, revoked or expired API key (the gateway's `forbidden`), or the
-        account is not API-eligible (`account_suspended`). Not retryable.
+      description: |
+        Never charged. One of:
+        - the gateway's `forbidden`: an unknown, revoked or expired API key.
+        - `account_suspended`: the account is not API-eligible. Not retryable.
+        - `account_blocked`: API access for this account is blocked; contact
+          support. Refused before metering (no `X-Credits-Remaining`).
+        - `not_entitled`: the plan does not include this feature or symbol,
+          or the symbol is a futures contract, which the API does not serve.
+          Refused before metering (no `X-Credits-Remaining`).
       content:
         application/json:
           schema: { $ref: "#/components/schemas/Error" }
           examples:
             suspended: { value: { error: { code: account_suspended, message: "Account suspended." } } }
+            notEntitled: { value: { error: { code: not_entitled, message: "ES1: futures data isn't available through the API." } } }
     RateLimited:
-      description: Per-minute rate limit exceeded.
+      description: |
+        Never charged. The gateway's `rate_limited` (per-minute ceiling; no
+        `Retry-After`, wait for `X-RateLimit-Reset`), or the API's
+        `too_many_concurrent_requests` (too many requests in flight for this
+        account; refused before metering, `Retry-After: 1`).
       headers: { Retry-After: { schema: { type: integer } } }
       content: { application/json: { schema: { $ref: "#/components/schemas/Error" } } }
     Unavailable:
-      description: The credit ledger or datafeed is temporarily unavailable.
+      description: |
+        Temporarily unavailable; retry. One of `api_paused` (the API is paused
+        by an operator; refused before metering, carries `Retry-After` and
+        `X-Skylit-Paused: 1`) or `credit_check_failed` (the credit balance
+        could not be checked; nothing was charged).
+      content: { application/json: { schema: { $ref: "#/components/schemas/Error" } } }
+    GatewayTimeout:
+      description: |
+        `gateway_timeout`: the request ran longer than 25 seconds and was
+        cancelled. Refunded; retry, or narrow the range.
       content: { application/json: { schema: { $ref: "#/components/schemas/Error" } } }

@@ -794,12 +794,27 @@ paths:
         print, across every ticker unless you filter. This is the same feed
         that drives the Skylit website, with the same filter semantics.
 
-        ### Live only
+        ### Resuming without gaps
 
-        The stream carries trades that arrive **after** you connect; it
-        replays no history. Load a backlog from `/v1/flow/{ticker}` first if
-        you need one, then attach here. `limit` is rejected with `400` rather
-        than silently ignored.
+        A new connection carries trades that arrive **after** you connect.
+        To pick up where a previous connection stopped, reconnect with the
+        last `trade_id` you received, either as the `Last-Event-ID` header
+        (browsers' `EventSource` sends it automatically) or as `since=`. The
+        stream first sends the trades you missed, through your filters, then
+        a `replayed` event, then live trades.
+
+        - The replay starts 10 seconds **before** your cursor, because
+          trades arrive in roughly, not strictly, timestamp order. Drop any
+          `trade_id` you already hold.
+        - It reaches back at most **15 minutes**. Anything older, or a replay
+          that could not be served, arrives as a `gap` event naming the
+          window; fetch it from `/v1/flow/{ticker}`.
+        - Replayed trades carry the same `trade_id` and fields as live ones;
+          their percentile-style scores use current baselines.
+        - Cancelled prints are not replayed.
+
+        `limit` is rejected with `400`: the stream is not a history endpoint.
+        Load a backlog from `/v1/flow/{ticker}` first if you need one.
 
         ### Pricing
 
@@ -825,6 +840,8 @@ paths:
         |---|---|---|
         | `connected` | stream terms | First frame after the stream opens. |
         | `trade` | trade object | A trade that passed your filters. Flags `sweep_trade`, `multi_leg` and `cross_trade` are always present. The SSE `id:` is the trade's `trade_id`. |
+        | `replayed` | `{"count": N, "from_ns": "...", "to_ns": "..."}` | Resume only. The catch-up is complete; live trades follow. |
+        | `gap` | `{"from_ns": "...", "to_ns": "...", "reason": "..."}` | Resume only. Trades in this window were not replayed: `beyond_lookback`, `replay_limit` or `replay_unavailable`. |
         | `credits` | `{"remaining": N}` | Emitted each minute after billing. |
         | `lagged` | `{"dropped": N}` | You read slower than the tape; trades were skipped. |
         | `closed` | `{"reason": "..."}` | Terminal. `insufficient_credits`, `account_suspended`, `credit_check_failed`, or `feed_unavailable`. |
@@ -859,6 +876,21 @@ paths:
         `-N` matters: without it curl buffers the response and the stream
         appears to hang.
       parameters:
+        - name: Last-Event-ID
+          in: header
+          required: false
+          description: |
+            Resume cursor: the last `trade_id` received. Sent automatically
+            by `EventSource` on reconnect. Takes precedence over `since`.
+          schema: { type: string, example: "flow_188afe42c3a77af2_9c1e0b7d4a2f6e13" }
+        - name: since
+          in: query
+          required: false
+          description: |
+            Resume cursor for clients that cannot set `Last-Event-ID`: a
+            `trade_id`, a nanosecond timestamp, or an RFC 3339 time. An
+            unparseable value is rejected with `400 invalid_cursor`.
+          schema: { type: string }
         - name: ticker
           in: query
           required: false
@@ -1048,7 +1080,8 @@ paths:
         "400":
           description: |
             An unsupported parameter was supplied — `limit` is not valid on
-            the stream.
+            the stream (`unsupported_parameter`) — or the resume cursor could
+            not be parsed (`invalid_cursor`).
           content:
             application/json:
               schema: { $ref: "#/components/schemas/Error" }
