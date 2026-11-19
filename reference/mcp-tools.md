@@ -4,7 +4,7 @@
 
 > **Beta.** The API and MCP server are open to members with API access. Check yours on the [Developer page](https://app.skylit.ai/developer).
 
-> **Coming soon:** tools for placing paper trades in your Nexus accounts. Until then, use the [Nexus Trades API](https://www.skylit.ai/docs/nexus-trades/overview) from your own code.
+> **Coming soon:** tools for placing simulated trades in your Nexus accounts. Until then, use the [Nexus Trades API](https://www.skylit.ai/docs/nexus-trades/overview) from your own code.
 
 The server exposes the tools below. Each call costs the same credits as the
 equivalent REST endpoint; the cost is shown per tool below and your remaining
@@ -21,7 +21,8 @@ values and the response schema, see the
 operation. The `heat_*` tools map to the Heatseeker endpoints, the `tempest_*` tools to the
 Tempest `/v1/vol` endpoints, and everything else maps to Flowseeker. All are served on `api.skylit.ai`
 (Flowseeker is also on its alias, `flow-api.skylit.ai`). Atlas isn't on the MCP server; its REST API
-is on its own host, `https://atlas-api.skylit.ai`.
+is on its own host, `https://atlas-api.skylit.ai`. The `nexus_*` tools are the exception: they read
+your own Nexus journal from the Nexus Trades API on `app.skylit.ai` and are free (see the Nexus section below).
 
 > **Info:** Tools that take a single option contract expect an **OPRA symbol** in URL-safe
 > form: `{ticker}__{YYMMDD}{C|P}{strike×1000, 8 digits}` — e.g.
@@ -177,6 +178,62 @@ Tempest's precomputed volatility modules for the symbols it covers. Tempest acce
 | `tempest_derived` | One year daily: 20-day realized vol, VRP series and percentile, the SVX30 usual-range band, earnings-eve sessions, spot-vol correlation | **`symbols`** | `GET /v1/vol/derived` | 3 |
 | `tempest_status` | When Tempest last computed, the session it belongs to, whether it is serving the frozen close, market state and coverage counts | none | `GET /v1/vol/status` | 0 |
 | `tempest_symbols` | Every symbol Tempest covers, with its latest asOf and last stored daily session | none | `GET /v1/vol/symbols` | 0 |
+
+## Nexus: your own simulated trading journal
+
+Read-only tools over your **own** Nexus journal, ports, setups, ranks and futures accounts, read with your key and visible only to you. They call the [Nexus Trades API](https://www.skylit.ai/docs/nexus-trades/journal-api) on `app.skylit.ai` (not `api.skylit.ai`), never debit credits, and are limited by Nexus to about 120 reads a minute per key. They never place, change or close a trade, a spread or a port, and never write a note, a setup or a tag. Each journal tool in the first table takes `account` (`main`, the default, or `agent` for your bot) and `port`. Money is US dollars (US cents in the futures journal); a missing value means not measured, never 0.
+
+### Journal, trades, spreads and setups
+
+| Tool | Returns | Arguments | Endpoint | Credits |
+| --- | --- | --- | --- | --: |
+| `nexus_journal_stats` | Headline figures over a range: trades, measured trades, wins, losses, win rate, net P&L, average win and loss, profit factor, best and worst trade, consistency, green and red days | `account`, `port`, `range` | `GET /api/nexus/v1/journal/stats` | 0 |
+| `nexus_journal_growth` | The account's cash balance at the end of each day it moved, with net change and max drawdown (a cash curve, not equity: open positions are not marked) | `account`, `port`, `range` | `GET /api/nexus/v1/journal/growth` | 0 |
+| `nexus_journal_breakdown` | Closed trades split along one dimension (`by`: duration, session, weekday, direction, ticker, playbook, orderType, exitOrderType), with best and worst only from 5 measured trades | `account`, `by`, `port`, `range` | `GET /api/nexus/v1/journal/breakdown` | 0 |
+| `nexus_journal_calendar` | One month of realized days with month totals; a day or month with nothing measured is `null`, not 0 | `account`, `month`, `port` | `GET /api/nexus/v1/journal/calendar` | 0 |
+| `nexus_journal_daily` | One New York trading day (`date`, default today): the day's stats, the cash carried in, what the day did to the cash, every cash move in order, and the trades that finished that day (the same rows as `nexus_trades` with that `exitDay`). A day with nothing finished is `stats` null, never a row of zeros | `account`, `date`, `port` | `GET /api/nexus/v1/journal/daily` | 0 |
+| `nexus_journal_behaviour` | How you manage trades, all time: capture rate, upside missed after the exit, giveback from the peak and drawdown while held, each with its sample size (a figure whose sample is 0 is null: not measured, never 0) | `account`, `port` | `GET /api/nexus/v1/journal/behaviour` | 0 |
+| `nexus_journal_recap` | Your recap for one season Arc (`arc` 1 to 4 and `year`, or the Arc in progress): trades, win rate, net P&L, profit factor, green and red days, best day, trade, ticker and session, green streak and curve; `complete` is false while the Arc is running | `account`, `arc`, `port`, `year` | `GET /api/nexus/v1/journal/recap` | 0 |
+| `nexus_journal_execution` | What your fills cost against the quoted mid at fill time: fills measured out of all fills, average spread width and slippage, total slippage cost, and that cost as a share of gross profit (no upper bound, so read it with gross profit), split into buys and sells | `account`, `port`, `range` | `GET /api/nexus/v1/journal/execution` | 0 |
+| `nexus_agent_edge` | Your bot's Edge and Proven Edge over its account or one extra port | `port` | `GET /api/nexus/v1/agent/edge` | 0 |
+| `nexus_agent_rank` | Your bot's rank, private to you, for the Bot or one extra port: tier, division, EP, placement, series and shield, the next tier and each of its criteria (met or missing). Main is refused (your own rank is `nexus_my_rank`); `{"enabled": false}` when agent ranks are off, which is not a rank of zero | `port` | `GET /api/nexus/v1/agent/rank` | 0 |
+| `nexus_trades` | Your simulated trades (options and stocks), with the latest mark on open ones. `status`: `open`, `closed` (trades you closed, leaving out options that expired), `expired` (only those), `settled` (closed and expired: the trades your calendar and stats count) or `all` (default). `exitDay` (YYYY-MM-DD, New York): only trades that finished that day, the same day as the calendar | `account`, `exitDay`, `limit`, `offset`, `port`, `status` | `GET /api/nexus/v1/trades` | 0 |
+| `nexus_spreads` | Your open option spreads on your main account: strategy, debit or credit, open price and mark, unrealized and realized P&L, collateral, the exit plan and each leg. A mark is null until every leg has one; `feature_disabled` when spreads are not open for you, which is not an empty book | `limit`, `offset` | `GET /api/nexus/v1/spreads` | 0 |
+| `nexus_spread_history` | Your closed and settled option spreads, newest closed first: open and close price, realized P&L and percent, why it closed (you, the desk or expiry) and each leg's open and close | `limit`, `offset` | `GET /api/nexus/v1/spreads/history` | 0 |
+| `nexus_playbooks` | Your setups for one account (`agent`, the default here, or `main`; each account has its own): name, description, color and rules, archived ones only with `includeArchived` | `account`, `includeArchived` | `GET /api/nexus/v1/playbooks` | 0 |
+| `nexus_trade_playbook` | The setup one of your trades is tagged with (`tradeId` from `nexus_trades`) and which of its rules you followed; a trade with no setup is `tag` null | **`tradeId`** | `GET /api/nexus/v1/trades/{tradeId}/playbook` | 0 |
+| `nexus_ports` | Your ports: id, name, kind, account, cash, realized P&L, open count, limits | none | `GET /api/nexus/v1/trading/ports` | 0 |
+
+### Yours as a member: notes, passed trades and your rank
+
+These are yours as a member, not an account's or a port's, so they take no `account` or `port`.
+
+| Tool | Returns | Arguments | Endpoint | Credits |
+| --- | --- | --- | --- | --: |
+| `nexus_journal_notes` | The days in one month (`month` YYYY-MM, default this month) you wrote a journal note about; a month with no note is an empty list | `month` | `GET /api/nexus/v1/journal/notes` | 0 |
+| `nexus_journal_note` | What you wrote about one trading day (`day` YYYY-MM-DD); a day you never wrote about is `data` null, not an empty note | **`day`** | `GET /api/nexus/v1/journal/notes/{day}` | 0 |
+| `nexus_journal_passed` | The trades you saw and chose not to take, with your reasons and how they would have worked, for a `month` or a `from` and `to` range (at most 400 days); a field you left blank is null | `from`, `month`, `to` | `GET /api/nexus/v1/journal/passed` | 0 |
+| `nexus_my_rank` | Your own member rank, the one on your profile: tier, division, EP, positions counted, Edge figures, placement, series, shield and progress to the next tier. `{"enabled": false}` until ranks are on for you, which is not a rank of zero | none | `GET /api/nexus/v1/ranks/me` | 0 |
+| `nexus_my_rank_form` | Your recent form on your member rank: one print per recent position (green, red or scratch), your run, best and worst, and recent positions against your normal | none | `GET /api/nexus/v1/ranks/me/form` | 0 |
+| `nexus_my_rank_chart` | Your member rank as a line over time (`range` `3m`, `1y` default, or `all`), with placement, promotions and demotions, and your pace to the next tier (null when there is no steady climb, not a pace of 0) | `range` | `GET /api/nexus/v1/ranks/me/chart` | 0 |
+| `nexus_my_rank_events` | Your member rank's events, newest first: placement, promotions, demotions, series, shields and EP moves, with the figures each was worked out from | `after`, `limit` | `GET /api/nexus/v1/ranks/me/events` | 0 |
+| `nexus_my_agents` | Your own agent profiles as you see them in Nexus: name, link, picture, bio, strategy tags and who can see them, plus every strategy tag there is; none yet is an empty list | none | `GET /api/nexus/v1/agents/mine` | 0 |
+
+### Futures journal
+
+The futures tools take their own `account`: `practice`, `agent` (your bot's), `evaluation` or `funded`, or one of your futures account ids (`nexus_futures_trades`, `_stats` and `_behaviour` also take `main` or `all`, every account but your bot's; `nexus_futures_recap` and `_events` read one account, `practice` by default, and take `main` to mean `practice`). Money is in **US cents** (4284 = $42.84) and prices in index points; a futures day runs from 6 PM ET the evening before. An account with no order yet answers not found: a read never opens one.
+
+| Tool | Returns | Arguments | Endpoint | Credits |
+| --- | --- | --- | --- | --: |
+| `nexus_futures_trades` | Every futures trade (flat to flat) closed in one month of futures trading days, newest first, with each day's result and the month's totals (money in US cents) | `account`, `month` | `GET /api/nexus/v1/journal/futures/trades` | 0 |
+| `nexus_futures_stats` | Headline figures over a range: trades, net, fees, win rate, profit factor, expectancy, largest win and loss, points per contract, hold and streaks, the equity curve, and splits by instrument, side, hour, weekday, hold time and account, each with its trade count (money in US cents) | `account`, `range` | `GET /api/nexus/v1/journal/futures/stats` | 0 |
+| `nexus_futures_behaviour` | How you trade futures over a range: where your expectancy comes from, how one trade changes the next, size and adding to a loser, a daily stop what-if, and how far trades went for and against you (medians over trades with a recorded path; money in US cents) | `account`, `range` | `GET /api/nexus/v1/journal/futures/behaviour` | 0 |
+| `nexus_futures_recap` | One account's trading day (`date`, default the last day that closed): net, trades, wins, losses, best and worst trade, deepest point, daily limit used, end balance and that day's account events (money in US cents) | `account`, `date` | `GET /api/nexus/v1/journal/futures/recap` | 0 |
+| `nexus_futures_events` | Everything that happened to one futures account, oldest first: started, daily lock, failed, passed, funded, payout, reset, with balance and equity at the time in US cents | `account` | `GET /api/nexus/v1/journal/futures/events` | 0 |
+| `nexus_futures_evaluations` | Your evaluations by calendar quarter in New York time and in total: started, passed, blown, daily locks and pass rate (null for a quarter in which none ended, not 0%), how many are running and the 20 most recent events | none | `GET /api/nexus/v1/journal/futures/evaluations` | 0 |
+| `nexus_futures_trip` | One futures trade in full (`tripId` from `nexus_futures_trades`): its fills, the path price took while it was open, and how far that went for and against you; exit figures are null while it is open (money in US cents) | **`tripId`** | `GET /api/nexus/v1/journal/futures/trips/{tripId}` | 0 |
+
+> **Note:** If ports are ever switched off, `nexus_ports` and any `port` argument answer `feature_disabled` (free), and the journal tools still work with `account` alone. Check `nexus_agent_edge` for `{"enabled": false}` before reading anything else. Some of these reads are newer than others: where Nexus does not serve one yet the tool says so (free), which is not an empty result. On `nexus_trades`, a `status` of `expired` or `settled` that is not served yet answers 400, and a row whose `exitDate` falls on another New York day means `exitDay` was not applied. See [Journal API](https://www.skylit.ai/docs/nexus-trades/journal-api).
 
 ## Account
 

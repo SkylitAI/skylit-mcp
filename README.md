@@ -123,7 +123,7 @@ Details: [Intelligence tools](https://www.skylit.ai/docs/mcp/intelligence?utm_so
 ## Tools
 
 <!-- sync:tools:start -->
-69 tools, all read-only. Most wrap one Skylit REST endpoint with the same credit cost; the intelligence tools combine several and are served on their own list (`/mcp?toolset=intelligence`). Full catalog with arguments and prices: [www.skylit.ai/docs/mcp/tools](https://www.skylit.ai/docs/mcp/tools?utm_source=github&utm_medium=developer&utm_campaign=api_distribution&utm_content=readme); machine-readable copy: [reference/tools.json](reference/tools.json).
+100 tools, all read-only. Most wrap one Skylit REST endpoint with the same credit cost; the intelligence tools combine several and are served on their own list (`/mcp?toolset=intelligence`). Full catalog with arguments and prices: [www.skylit.ai/docs/mcp/tools](https://www.skylit.ai/docs/mcp/tools?utm_source=github&utm_medium=developer&utm_campaign=api_distribution&utm_content=readme); machine-readable copy: [reference/tools.json](reference/tools.json).
 
 | Group | Tools |
 | --- | --- |
@@ -139,6 +139,7 @@ Details: [Intelligence tools](https://www.skylit.ai/docs/mcp/intelligence?utm_so
 | Dark pool | `dark_pool_trades`, `dark_pool_top_prints` |
 | Heatseeker — gamma/vanna heatmaps | `heat_heatmap`, `heat_levels`, `heat_historical_heatmap`, `heat_stats_daily`, `heat_symbols` |
 | Tempest — volatility suite | `tempest_iv`, `tempest_term`, `tempest_cones`, `tempest_sigma`, `tempest_surface`, `tempest_tilt`, `tempest_events`, `tempest_snapshot`, `tempest_market`, `tempest_screener`, `tempest_history`, `tempest_derived`, `tempest_status`, `tempest_symbols` |
+| Nexus: your own simulated trading journal | `nexus_journal_stats`, `nexus_journal_growth`, `nexus_journal_breakdown`, `nexus_journal_calendar`, `nexus_journal_daily`, `nexus_journal_behaviour`, `nexus_journal_recap`, `nexus_journal_execution`, `nexus_agent_edge`, `nexus_agent_rank`, `nexus_trades`, `nexus_spreads`, `nexus_spread_history`, `nexus_playbooks`, `nexus_trade_playbook`, `nexus_ports`, `nexus_journal_notes`, `nexus_journal_note`, `nexus_journal_passed`, `nexus_my_rank`, `nexus_my_rank_form`, `nexus_my_rank_chart`, `nexus_my_rank_events`, `nexus_my_agents`, `nexus_futures_trades`, `nexus_futures_stats`, `nexus_futures_behaviour`, `nexus_futures_recap`, `nexus_futures_events`, `nexus_futures_evaluations`, `nexus_futures_trip` |
 | Account | `account_usage` |
 | Intelligence tools | `explain_levels`, `vol_context`, `whats_changed`, `market_brief`, `flow_context` |
 <!-- sync:tools:end -->

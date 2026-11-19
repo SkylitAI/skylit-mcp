@@ -1,6 +1,6 @@
 {
   "server": "https://mcp.skylit.ai/mcp",
-  "count": 69,
+  "count": 100,
   "tools": [
     {
       "name": "flow_search",
@@ -441,6 +441,223 @@
       "section": "Tempest \u2014 volatility suite",
       "returns": "Every symbol Tempest covers, with its latest asOf and last stored daily session",
       "endpoint": "GET /v1/vol/symbols",
+      "credits": "0"
+    },
+    {
+      "name": "nexus_journal_stats",
+      "section": "Nexus: your own simulated trading journal",
+      "returns": "Headline figures over a range: trades, measured trades, wins, losses, win rate, net P&L, average win and loss, profit factor, best and worst trade, consistency, green and red days",
+      "endpoint": "GET /api/nexus/v1/journal/stats",
+      "credits": "0"
+    },
+    {
+      "name": "nexus_journal_growth",
+      "section": "Nexus: your own simulated trading journal",
+      "returns": "The account's cash balance at the end of each day it moved, with net change and max drawdown (a cash curve, not equity: open positions are not marked)",
+      "endpoint": "GET /api/nexus/v1/journal/growth",
+      "credits": "0"
+    },
+    {
+      "name": "nexus_journal_breakdown",
+      "section": "Nexus: your own simulated trading journal",
+      "returns": "Closed trades split along one dimension (`by`: duration, session, weekday, direction, ticker, playbook, orderType, exitOrderType), with best and worst only from 5 measured trades",
+      "endpoint": "GET /api/nexus/v1/journal/breakdown",
+      "credits": "0"
+    },
+    {
+      "name": "nexus_journal_calendar",
+      "section": "Nexus: your own simulated trading journal",
+      "returns": "One month of realized days with month totals; a day or month with nothing measured is `null`, not 0",
+      "endpoint": "GET /api/nexus/v1/journal/calendar",
+      "credits": "0"
+    },
+    {
+      "name": "nexus_journal_daily",
+      "section": "Nexus: your own simulated trading journal",
+      "returns": "One New York trading day (`date`, default today): the day's stats, the cash carried in, what the day did to the cash, every cash move in order, and the trades that finished that day (the same rows as `nexus_trades` with that `exitDay`). A day with nothing finished is `stats` null, never a row of zeros",
+      "endpoint": "GET /api/nexus/v1/journal/daily",
+      "credits": "0"
+    },
+    {
+      "name": "nexus_journal_behaviour",
+      "section": "Nexus: your own simulated trading journal",
+      "returns": "How you manage trades, all time: capture rate, upside missed after the exit, giveback from the peak and drawdown while held, each with its sample size (a figure whose sample is 0 is null: not measured, never 0)",
+      "endpoint": "GET /api/nexus/v1/journal/behaviour",
+      "credits": "0"
+    },
+    {
+      "name": "nexus_journal_recap",
+      "section": "Nexus: your own simulated trading journal",
+      "returns": "Your recap for one season Arc (`arc` 1 to 4 and `year`, or the Arc in progress): trades, win rate, net P&L, profit factor, green and red days, best day, trade, ticker and session, green streak and curve; `complete` is false while the Arc is running",
+      "endpoint": "GET /api/nexus/v1/journal/recap",
+      "credits": "0"
+    },
+    {
+      "name": "nexus_journal_execution",
+      "section": "Nexus: your own simulated trading journal",
+      "returns": "What your fills cost against the quoted mid at fill time: fills measured out of all fills, average spread width and slippage, total slippage cost, and that cost as a share of gross profit (no upper bound, so read it with gross profit), split into buys and sells",
+      "endpoint": "GET /api/nexus/v1/journal/execution",
+      "credits": "0"
+    },
+    {
+      "name": "nexus_agent_edge",
+      "section": "Nexus: your own simulated trading journal",
+      "returns": "Your bot's Edge and Proven Edge over its account or one extra port",
+      "endpoint": "GET /api/nexus/v1/agent/edge",
+      "credits": "0"
+    },
+    {
+      "name": "nexus_agent_rank",
+      "section": "Nexus: your own simulated trading journal",
+      "returns": "Your bot's rank, private to you, for the Bot or one extra port: tier, division, EP, placement, series and shield, the next tier and each of its criteria (met or missing). Main is refused (your own rank is `nexus_my_rank`); `{\"enabled\": false}` when agent ranks are off, which is not a rank of zero",
+      "endpoint": "GET /api/nexus/v1/agent/rank",
+      "credits": "0"
+    },
+    {
+      "name": "nexus_trades",
+      "section": "Nexus: your own simulated trading journal",
+      "returns": "Your simulated trades (options and stocks), with the latest mark on open ones. `status`: `open`, `closed` (trades you closed, leaving out options that expired), `expired` (only those), `settled` (closed and expired: the trades your calendar and stats count) or `all` (default). `exitDay` (YYYY-MM-DD, New York): only trades that finished that day, the same day as the calendar",
+      "endpoint": "GET /api/nexus/v1/trades",
+      "credits": "0"
+    },
+    {
+      "name": "nexus_spreads",
+      "section": "Nexus: your own simulated trading journal",
+      "returns": "Your open option spreads on your main account: strategy, debit or credit, open price and mark, unrealized and realized P&L, collateral, the exit plan and each leg. A mark is null until every leg has one; `feature_disabled` when spreads are not open for you, which is not an empty book",
+      "endpoint": "GET /api/nexus/v1/spreads",
+      "credits": "0"
+    },
+    {
+      "name": "nexus_spread_history",
+      "section": "Nexus: your own simulated trading journal",
+      "returns": "Your closed and settled option spreads, newest closed first: open and close price, realized P&L and percent, why it closed (you, the desk or expiry) and each leg's open and close",
+      "endpoint": "GET /api/nexus/v1/spreads/history",
+      "credits": "0"
+    },
+    {
+      "name": "nexus_playbooks",
+      "section": "Nexus: your own simulated trading journal",
+      "returns": "Your setups for one account (`agent`, the default here, or `main`; each account has its own): name, description, color and rules, archived ones only with `includeArchived`",
+      "endpoint": "GET /api/nexus/v1/playbooks",
+      "credits": "0"
+    },
+    {
+      "name": "nexus_trade_playbook",
+      "section": "Nexus: your own simulated trading journal",
+      "returns": "The setup one of your trades is tagged with (`tradeId` from `nexus_trades`) and which of its rules you followed; a trade with no setup is `tag` null",
+      "endpoint": "GET /api/nexus/v1/trades/{tradeId}/playbook",
+      "credits": "0"
+    },
+    {
+      "name": "nexus_ports",
+      "section": "Nexus: your own simulated trading journal",
+      "returns": "Your ports: id, name, kind, account, cash, realized P&L, open count, limits",
+      "endpoint": "GET /api/nexus/v1/trading/ports",
+      "credits": "0"
+    },
+    {
+      "name": "nexus_journal_notes",
+      "section": "Nexus: your own simulated trading journal",
+      "returns": "The days in one month (`month` YYYY-MM, default this month) you wrote a journal note about; a month with no note is an empty list",
+      "endpoint": "GET /api/nexus/v1/journal/notes",
+      "credits": "0"
+    },
+    {
+      "name": "nexus_journal_note",
+      "section": "Nexus: your own simulated trading journal",
+      "returns": "What you wrote about one trading day (`day` YYYY-MM-DD); a day you never wrote about is `data` null, not an empty note",
+      "endpoint": "GET /api/nexus/v1/journal/notes/{day}",
+      "credits": "0"
+    },
+    {
+      "name": "nexus_journal_passed",
+      "section": "Nexus: your own simulated trading journal",
+      "returns": "The trades you saw and chose not to take, with your reasons and how they would have worked, for a `month` or a `from` and `to` range (at most 400 days); a field you left blank is null",
+      "endpoint": "GET /api/nexus/v1/journal/passed",
+      "credits": "0"
+    },
+    {
+      "name": "nexus_my_rank",
+      "section": "Nexus: your own simulated trading journal",
+      "returns": "Your own member rank, the one on your profile: tier, division, EP, positions counted, Edge figures, placement, series, shield and progress to the next tier. `{\"enabled\": false}` until ranks are on for you, which is not a rank of zero",
+      "endpoint": "GET /api/nexus/v1/ranks/me",
+      "credits": "0"
+    },
+    {
+      "name": "nexus_my_rank_form",
+      "section": "Nexus: your own simulated trading journal",
+      "returns": "Your recent form on your member rank: one print per recent position (green, red or scratch), your run, best and worst, and recent positions against your normal",
+      "endpoint": "GET /api/nexus/v1/ranks/me/form",
+      "credits": "0"
+    },
+    {
+      "name": "nexus_my_rank_chart",
+      "section": "Nexus: your own simulated trading journal",
+      "returns": "Your member rank as a line over time (`range` `3m`, `1y` default, or `all`), with placement, promotions and demotions, and your pace to the next tier (null when there is no steady climb, not a pace of 0)",
+      "endpoint": "GET /api/nexus/v1/ranks/me/chart",
+      "credits": "0"
+    },
+    {
+      "name": "nexus_my_rank_events",
+      "section": "Nexus: your own simulated trading journal",
+      "returns": "Your member rank's events, newest first: placement, promotions, demotions, series, shields and EP moves, with the figures each was worked out from",
+      "endpoint": "GET /api/nexus/v1/ranks/me/events",
+      "credits": "0"
+    },
+    {
+      "name": "nexus_my_agents",
+      "section": "Nexus: your own simulated trading journal",
+      "returns": "Your own agent profiles as you see them in Nexus: name, link, picture, bio, strategy tags and who can see them, plus every strategy tag there is; none yet is an empty list",
+      "endpoint": "GET /api/nexus/v1/agents/mine",
+      "credits": "0"
+    },
+    {
+      "name": "nexus_futures_trades",
+      "section": "Nexus: your own simulated trading journal",
+      "returns": "Every futures trade (flat to flat) closed in one month of futures trading days, newest first, with each day's result and the month's totals (money in US cents)",
+      "endpoint": "GET /api/nexus/v1/journal/futures/trades",
+      "credits": "0"
+    },
+    {
+      "name": "nexus_futures_stats",
+      "section": "Nexus: your own simulated trading journal",
+      "returns": "Headline figures over a range: trades, net, fees, win rate, profit factor, expectancy, largest win and loss, points per contract, hold and streaks, the equity curve, and splits by instrument, side, hour, weekday, hold time and account, each with its trade count (money in US cents)",
+      "endpoint": "GET /api/nexus/v1/journal/futures/stats",
+      "credits": "0"
+    },
+    {
+      "name": "nexus_futures_behaviour",
+      "section": "Nexus: your own simulated trading journal",
+      "returns": "How you trade futures over a range: where your expectancy comes from, how one trade changes the next, size and adding to a loser, a daily stop what-if, and how far trades went for and against you (medians over trades with a recorded path; money in US cents)",
+      "endpoint": "GET /api/nexus/v1/journal/futures/behaviour",
+      "credits": "0"
+    },
+    {
+      "name": "nexus_futures_recap",
+      "section": "Nexus: your own simulated trading journal",
+      "returns": "One account's trading day (`date`, default the last day that closed): net, trades, wins, losses, best and worst trade, deepest point, daily limit used, end balance and that day's account events (money in US cents)",
+      "endpoint": "GET /api/nexus/v1/journal/futures/recap",
+      "credits": "0"
+    },
+    {
+      "name": "nexus_futures_events",
+      "section": "Nexus: your own simulated trading journal",
+      "returns": "Everything that happened to one futures account, oldest first: started, daily lock, failed, passed, funded, payout, reset, with balance and equity at the time in US cents",
+      "endpoint": "GET /api/nexus/v1/journal/futures/events",
+      "credits": "0"
+    },
+    {
+      "name": "nexus_futures_evaluations",
+      "section": "Nexus: your own simulated trading journal",
+      "returns": "Your evaluations by calendar quarter in New York time and in total: started, passed, blown, daily locks and pass rate (null for a quarter in which none ended, not 0%), how many are running and the 20 most recent events",
+      "endpoint": "GET /api/nexus/v1/journal/futures/evaluations",
+      "credits": "0"
+    },
+    {
+      "name": "nexus_futures_trip",
+      "section": "Nexus: your own simulated trading journal",
+      "returns": "One futures trade in full (`tripId` from `nexus_futures_trades`): its fills, the path price took while it was open, and how far that went for and against you; exit figures are null while it is open (money in US cents)",
+      "endpoint": "GET /api/nexus/v1/journal/futures/trips/{tripId}",
       "credits": "0"
     },
     {
