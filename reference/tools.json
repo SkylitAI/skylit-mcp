@@ -1,6 +1,6 @@
 {
   "server": "https://mcp.skylit.ai/mcp",
-  "count": 100,
+  "count": 103,
   "tools": [
     {
       "name": "flow_search",
@@ -658,6 +658,27 @@
       "section": "Nexus: your own simulated trading journal",
       "returns": "One futures trade in full (`tripId` from `nexus_futures_trades`): its fills, the path price took while it was open, and how far that went for and against you; exit figures are null while it is open (money in US cents)",
       "endpoint": "GET /api/nexus/v1/journal/futures/trips/{tripId}",
+      "credits": "0"
+    },
+    {
+      "name": "nexus_trade",
+      "section": "Nexus: your own simulated trading journal",
+      "returns": "One of your options or stocks trades (`tradeId` from `nexus_trades`): the same row `nexus_trades` lists, with its entries and exits, status and, once closed, realized P&L; an open one carries its latest mark. Someone else's trade is not found",
+      "endpoint": "GET /api/nexus/v1/trades/{tradeId}",
+      "credits": "0"
+    },
+    {
+      "name": "nexus_futures_account",
+      "section": "Nexus: your own simulated trading journal",
+      "returns": "One futures account as it stands now (`account`: `practice`, the default, `main` for the same, `agent`, `evaluation` or `funded` when you have exactly one running, or an account id): balance, open and day P&L, equity, positions, every resting order and, on an evaluation or funded account, the rules with the room left to each. An account not made yet is not found: a read never makes one",
+      "endpoint": "GET /api/nexus/v1/trading/accounts/{account}",
+      "credits": "0"
+    },
+    {
+      "name": "nexus_capabilities",
+      "section": "Nexus: your own simulated trading journal",
+      "returns": "What your key can do right now: asset classes and order types, the futures contracts and your futures accounts with what each allows, your bot's account, wallets, rate limits and the live stream. The first call sets up your futures practice account if you have none (nothing is placed)",
+      "endpoint": "GET /api/nexus/v1/trading/capabilities",
       "credits": "0"
     },
     {
