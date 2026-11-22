@@ -46,8 +46,11 @@ info:
     many requests in flight (`429` `too_many_concurrent_requests`). Those
     responses carry **no** `X-Credits-Remaining`. A request that reached
     metering carries `X-Credits-Remaining: <balance>`; if it then fails with
-    any `4xx` or `5xx` it is refunded, and that header already reflects the
-    refund. An unknown `/v1` path is `404` `not_found`.
+    any `4xx` or `5xx` it is refunded, and that header reflects the refund once
+    applied; if the refund write fails, it shows the charged balance.
+    An unknown `/v1` path is `404` `not_found`.
+    A method other than GET is `405` `method_not_allowed`, refused before
+    metering and not charged (HEAD is also accepted).
 
     Note that a charting client fetches `/v1/history` in **pages** (it walks the
     `to` cursor backward to fill the requested range), so a deep history pull
@@ -72,7 +75,8 @@ info:
     windows of `max_days` or fewer.
 
     A rejected `400` is refunded, like every failed call (any `4xx` or `5xx`
-    that reached metering): its `X-Credits-Remaining` already shows the refund.
+    that reached metering): its `X-Credits-Remaining` shows the refund once
+    applied; if the refund write fails, it shows the charged balance.
     The caps are fixed and
     published above, so check your range before sending it rather than
     discovering the limit by retrying.
@@ -148,7 +152,9 @@ paths:
         ends there, never that your range was clipped. Page through anything
         wider in windows of `max_days` or fewer.
 
-        A rejected `400` is refunded (failed calls are free). The caps are
+        A rejected `400` is refunded (failed calls are free); the credit header
+        reflects the refund once applied, or the charged balance if the refund
+        write fails. The caps are
         fixed and published here, so check your range before sending it rather
         than discovering the limit by retrying. `/v1/config` is free if you
         would rather read the feed's capabilities first.
@@ -280,8 +286,17 @@ paths:
                     max_days: 90
         "404":
           description: |
-            Unknown symbol (`symbol_not_found`). Refused before metering: never
-            charged, no `X-Credits-Remaining`.
+            Unknown symbol or OCC option symbol (`symbol_not_found`). Refused
+            before metering: never charged, no `X-Credits-Remaining`.
+          content:
+            application/json:
+              schema: { $ref: "#/components/schemas/HistoryError" }
+        "405":
+          description: |
+            Only GET and HEAD are supported (`method_not_allowed`). Refused before
+            metering, not charged.
+          headers:
+            Allow: { schema: { type: string, example: "GET, HEAD" } }
           content:
             application/json:
               schema: { $ref: "#/components/schemas/HistoryError" }
@@ -449,7 +464,9 @@ paths:
       tags: [Symbols]
       description: |
         Ranked symbol search for the datafeed's symbol picker (exact ticker >
-        prefix > substring). Returns up to `limit` matches.
+        prefix > substring). Returns up to `limit` matches. Cache-Control is
+        private because futures visibility varies by caller; initiate-only
+        lists remain no-store.
       parameters:
         - name: query
           in: query
@@ -463,12 +480,38 @@ paths:
             Max results, default 25. A larger value is served as 500 (one call
             returns at most 500 rows); `0` returns an empty list.
           schema: { type: integer, default: 25, minimum: 0, maximum: 500 }
+        - name: type
+          in: query
+          description: Accepted and ignored; TradingView's widget sends this filter.
+          schema: { type: string }
+        - name: exchange
+          in: query
+          description: Accepted and ignored; TradingView's widget sends this filter.
+          schema: { type: string }
+        - name: kinds
+          in: query
+          description: |
+            Comma-separated kinds: `equity`, `index`, `future_continuous`,
+            `future_outright` (case-insensitive; whitespace and empty tokens
+            ignored). Absent or all-blank defaults to
+            `equity,index,future_continuous`. `option` and unknown kinds are
+            refused with 400 `invalid_parameter`. Futures rows are returned
+            only when the caller's plan includes futures; no plan currently
+            does, so requesting a futures kind does not grant futures access.
+          schema: { type: string }
+        - name: root
+          in: query
+          description: |
+            Futures root scope (for example `ES`), keeping only that root's
+            rows. Futures rows require a plan including futures; no plan
+            currently does.
+          schema: { type: string }
       responses:
         "200":
           description: Matching symbols.
           headers:
             X-Credits-Remaining: { $ref: "#/components/headers/CreditsRemaining" }
-            Cache-Control: { schema: { type: string, example: "public, max-age=300, stale-while-revalidate=60" } }
+            Cache-Control: { schema: { type: string, example: "private, max-age=300, stale-while-revalidate=60" } }
           content:
             application/json:
               schema:
@@ -477,8 +520,8 @@ paths:
               examples:
                 spy:
                   value:
-                    - { symbol: SPY, ticker: SPY, description: "SPDR S&P 500 ETF Trust", exchange: ARCA, type: fund }
-                    - { symbol: SPX, ticker: SPX, description: "S&P 500 Index", exchange: NASDAQ, type: index }
+                    - { symbol: SPY, ticker: SPY, description: SPY, exchange: "US Equities", type: stock }
+                    - { symbol: SPX, ticker: SPX, description: "S&P 500 Index (SPX, monthly AM-settled)", exchange: CBOE, type: index, kind: index }
         "400":
           description: |
             Missing or invalid parameter (`invalid_parameter`). Refused before
@@ -521,11 +564,11 @@ paths:
                   value:
                     ticker: SPY
                     name: SPY
-                    description: "SPDR S&P 500 ETF Trust"
-                    type: fund
+                    description: SPY
+                    type: stock
                     session: "0400-2000"
                     timezone: America/New_York
-                    exchange: ARCA
+                    exchange: US Equities
                     minmov: 1
                     pricescale: 100
                     has_intraday: true
@@ -555,8 +598,8 @@ paths:
         "403": { $ref: "#/components/responses/AccountSuspended" }
         "404":
           description: |
-            Unknown symbol (`symbol_not_found`). Refused before metering: never
-            charged, no `X-Credits-Remaining`.
+            Unknown symbol or OCC option symbol (`symbol_not_found`). Refused
+            before metering: never charged, no `X-Credits-Remaining`.
           content:
             application/json:
               schema: { $ref: "#/components/schemas/Error" }
@@ -569,6 +612,15 @@ paths:
                         Symbol "ZZZZQ" is not available. Find valid symbols with
                         /v1/search?query=... Nothing was charged.
                       docs_url: https://www.skylit.ai/docs/api-reference/errors#symbol_not_found
+        "405":
+          description: |
+            Only GET and HEAD are supported (`method_not_allowed`). Refused before
+            metering, not charged.
+          headers:
+            Allow: { schema: { type: string, example: "GET, HEAD" } }
+          content:
+            application/json:
+              schema: { $ref: "#/components/schemas/Error" }
         "429": { $ref: "#/components/responses/RateLimited" }
         "503": { $ref: "#/components/responses/Unavailable" }
         "504": { $ref: "#/components/responses/GatewayTimeout" }
@@ -651,9 +703,11 @@ paths:
       operationId: getOpenAPI
       x-credits: 0
       tags: [Meta]
+      security: []
       description: |
-        The document you are reading, as JSON. Free (0 credits); it still needs
-        your API key, like every other endpoint.
+        The document you are reading, as JSON. Free (0 credits) and keyless —
+        docs sites, SDK generators and agents can fetch it before they have a
+        key.
       responses:
         "200":
           description: OpenAPI 3.1 document for the Atlas Public API.
@@ -681,7 +735,7 @@ components:
 
   headers:
     CreditsRemaining:
-      description: Credit balance remaining after this request was debited (and refunded, when it failed). Present only on requests that reached metering; a request refused before it (invalid parameter, unknown symbol, plan or entitlement refusal, operator pause, too many requests in flight) carries none.
+      description: Credit balance remaining after this request was debited (and refunded, when it failed, once the refund is applied; if the refund write fails, this shows the charged balance). Present only on requests that reached metering; a request refused before it (invalid parameter, unknown symbol, plan or entitlement refusal, operator pause, too many requests in flight) carries none.
       schema: { type: integer, example: 4999 }
 
   schemas:
@@ -749,10 +803,13 @@ components:
       properties:
         symbol: { type: string, description: Canonical internal identifier (echo back to /v1/symbols and /v1/history). }
         ticker: { type: string, description: Display ticker shown in the picker. }
-        description: { type: string }
-        exchange: { type: string, example: ARCA }
-        type: { type: string, enum: [stock, fund, dr, index], description: "fund covers ETFs, ETCs and mutual funds; dr is a depositary receipt." }
-        kind: { type: string, description: "Present on indices (`index`); absent otherwise." }
+        description: { type: string, description: "Equity rows carry the ticker; indices carry a full name." }
+        exchange: { type: string, example: "US Equities", description: "Exchange display name. Equity rows, ETFs included, currently read `US Equities`; indices carry their venue (for example `CBOE`)." }
+        type: { type: string, enum: [stock, fund, dr, index, futures], description: "Equity rows, ETFs included, currently read `stock`; indices read `index`. `fund` and `dr` are in the range /v1/config advertises (`symbols_types`), but no current /v1/search or /v1/symbols row returns them. Futures rows require a plan including futures; no plan currently does." }
+        kind: { type: string, enum: [index, future_continuous, future_outright], description: "Present on indices (`index`) and futures rows (`future_continuous` or `future_outright`); absent for equities. Futures rows require a plan including futures; no plan currently does." }
+        root: { type: string, description: "Futures root; only present on futures outright rows when metadata is available." }
+        expiration: { type: string, format: date, description: "ISO date (YYYY-MM-DD); only present on futures outright rows when metadata is available." }
+        min_move: { type: number, description: "Price tick increment; only present on futures outright rows when metadata is available." }
 
     SymbolInfo:
       type: object
@@ -762,16 +819,16 @@ components:
         ticker: { type: string }
         name: { type: string }
         description: { type: string }
-        type: { type: string, enum: [stock, fund, dr, index], description: "fund covers ETFs, ETCs and mutual funds; dr is a depositary receipt." }
+        type: { type: string, enum: [stock, fund, dr, index], description: "Equities, ETFs included, currently read `stock`; indices read `index`. `fund` and `dr` are in the range /v1/config advertises (`symbols_types`), but no current /v1/search or /v1/symbols row returns them." }
         session:
           type: string
           example: "0400-2000"
           description: >-
             `session` is `"0400-2000"` for every symbol. With `/v1/history?extended=false` (the default), intraday bars anchor at the 09:30 ET open (`240` → 09:30, 13:30), not at `session`; with `extended=true`, they are clock-aligned.
         timezone: { type: string, example: America/New_York }
-        exchange: { type: string, example: ARCA }
-        minmov: { type: integer, example: 1 }
-        pricescale: { type: integer, example: 100 }
+        exchange: { type: string, example: "US Equities", description: "Exchange display name. Equities, ETFs included, currently read `US Equities`; indices carry their venue (for example `CBOE`)." }
+        minmov: { type: integer, example: 1, description: "Always 1 today." }
+        pricescale: { type: integer, example: 100, description: "10000 when the symbol's latest daily close is below $1; otherwise 100 (two decimals), including when no close is known. Re-evaluated about every 15 minutes from the last daily close. Bar prices are not rounded to this scale." }
         has_intraday: { type: boolean }
         has_daily: { type: boolean }
         has_weekly_and_monthly: { type: boolean }
@@ -781,7 +838,7 @@ components:
         intraday_multipliers: { type: array, items: { type: string } }
         supported_resolutions: { type: array, items: { type: string } }
         volume_precision: { type: integer, example: 0 }
-        data_status: { type: string, example: streaming }
+        data_status: { type: string, example: streaming, description: "Always streaming today; not a freshness signal." }
         format: { type: string, example: price }
 
     DatafeedConfig:
@@ -807,7 +864,7 @@ components:
           items:
             type: object
             properties:
-              value: { type: string }
+              value: { type: string, description: "TradingView exchange-filter values, accepted and ignored by /v1/search. Equity rows currently read `US Equities`, so these values do not appear on them." }
               name: { type: string }
               desc: { type: string }
         symbols_types:

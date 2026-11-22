@@ -102,7 +102,8 @@ info:
     - A parameter with a documented set of values (for example `timeframe`,
       `order_by`, `right`, `format`) must use one of them; anything else
       returns `400` `INVALID_PARAMETER` naming the allowed values. Date
-      parameters must be `YYYY-MM-DD`.
+      parameters must be `YYYY-MM-DD` and name a US/Eastern (New York)
+      calendar day; a trading date names that day's session.
     - A ticker Skylit has never seen returns `404` `SYMBOL_NOT_FOUND`, whether
       it is in the path, the root of a contract symbol, or a `ticker` filter.
       For a list parameter (`tickers`, `symbols`) the request is served when
@@ -230,6 +231,8 @@ paths:
         limit instead (bisecting) re-reads overlapping ranges, spends the
         account's query budget several times over, and gets an
         `X-Skylit-Hint` response header pointing here.
+
+        **Cost:** 1 credit per call. Counts toward your key's per-minute [rate limit](https://www.skylit.ai/docs/api-reference/rate-limits-and-retries).
       parameters:
         - $ref: "#/components/parameters/Ticker"
         - $ref: "#/components/parameters/Timeframe"
@@ -261,7 +264,7 @@ paths:
           description: |
             Filter by trade type. Comma-separated for multiple; every token
             must be one of the listed values.
-          schema: { type: string, enum: [sweep, multi_leg, all], default: all }
+          schema: { type: string, enum: [sweep, multi_leg, floor, all], default: all }
         - name: moneyness
           in: query
           required: false
@@ -328,7 +331,7 @@ paths:
         - name: expiration
           in: query
           required: false
-          description: Filter to a single expiration date (YYYY-MM-DD).
+          description: Filter to a single expiration date (`YYYY-MM-DD`).
           schema: { type: string, format: date }
         - name: conviction_weights
           in: query
@@ -362,7 +365,7 @@ paths:
         - name: date
           in: query
           required: false
-          description: Trading date (YYYY-MM-DD). Defaults to current trading date.
+          description: Trading date (`YYYY-MM-DD`, US/Eastern). Defaults to current trading date.
           schema: { type: string, format: date, example: "2026-05-27" }
       responses:
         "200":
@@ -404,6 +407,8 @@ paths:
         window — no row cap. Returns trade/sweep counts, VWF/SDF/FIR, and a
         bullish/bearish/neutral premium split with a one-line interpretation.
         Useful for arbitrary slicing without paging the full trade list.
+
+        **Cost:** 3 credits per call. Counts toward your key's per-minute [rate limit](https://www.skylit.ai/docs/api-reference/rate-limits-and-retries).
       parameters:
         - $ref: "#/components/parameters/Ticker"
         - $ref: "#/components/parameters/StartTime"
@@ -432,6 +437,7 @@ paths:
         - name: date
           in: query
           required: false
+          description: Trading day (`YYYY-MM-DD`, US/Eastern).
           schema: { type: string, format: date }
       responses:
         "200":
@@ -459,6 +465,8 @@ paths:
         Bucketed bullish vs bearish premium time series for a single ticker,
         with cumulative net premium and per-bucket VWF/SDF/FIR. The
         ticker-level analogue of `/v1/market/tide`.
+
+        **Cost:** 3 credits per call. Counts toward your key's per-minute [rate limit](https://www.skylit.ai/docs/api-reference/rate-limits-and-retries).
       parameters:
         - $ref: "#/components/parameters/Ticker"
         - $ref: "#/components/parameters/StartTime"
@@ -487,6 +495,7 @@ paths:
         - name: date
           in: query
           required: false
+          description: Trading day (`YYYY-MM-DD`, US/Eastern).
           schema: { type: string, format: date }
       responses:
         "200":
@@ -515,6 +524,8 @@ paths:
         deviation of trade count, premium, and FIR per intraday bucket over a
         configurable lookback window. The reference distribution behind
         `/v1/flow/{ticker}/momentum` z-scores.
+
+        **Cost:** 3 credits per call. Counts toward your key's per-minute [rate limit](https://www.skylit.ai/docs/api-reference/rate-limits-and-retries).
       parameters:
         - $ref: "#/components/parameters/Ticker"
         - $ref: "#/components/parameters/Bucket"
@@ -568,6 +579,8 @@ paths:
         trailing per-time-of-day baseline (`/v1/flow/{ticker}/baseline`).
         Returns z-scores for the 5-minute window and a one-token `trend`
         classification.
+
+        **Cost:** 3 credits per call. Counts toward your key's per-minute [rate limit](https://www.skylit.ai/docs/api-reference/rate-limits-and-retries).
       parameters:
         - $ref: "#/components/parameters/Ticker"
         - name: as_of
@@ -615,6 +628,8 @@ paths:
         by selected ordering (premium, net premium, volume, etc.) with
         bullish/bearish premium split, ask/bid mix, and OI context. Includes
         a top-3 concentration summary.
+
+        **Cost:** 3 credits per call. Counts toward your key's per-minute [rate limit](https://www.skylit.ai/docs/api-reference/rate-limits-and-retries).
       parameters:
         - $ref: "#/components/parameters/Ticker"
         - $ref: "#/components/parameters/StartTime"
@@ -675,12 +690,14 @@ paths:
         call-put ratio against the trailing 20-trading-day average for the
         same ticker. Returns absolute deltas, percentile rankings, and the
         five most-similar past trading days.
+
+        **Cost:** 5 credits per call. Counts toward your key's per-minute [rate limit](https://www.skylit.ai/docs/api-reference/rate-limits-and-retries).
       parameters:
         - $ref: "#/components/parameters/Ticker"
         - name: date
           in: query
           required: false
-          description: Date to evaluate (YYYY-MM-DD). Defaults to today.
+          description: Date to evaluate (`YYYY-MM-DD`, US/Eastern). Defaults to today.
           schema: { type: string, format: date }
       responses:
         "200":
@@ -710,6 +727,8 @@ paths:
         (`XLK`, `XLF`, `XLE`, …) or a sector name (`Technology`,
         `Financials`, …). Returns sector-level metrics, top-contributor
         tickers, and an industry-level breakdown.
+
+        **Cost:** 3 credits per call. Counts toward your key's per-minute [rate limit](https://www.skylit.ai/docs/api-reference/rate-limits-and-retries).
       parameters:
         - name: sector
           in: path
@@ -722,6 +741,7 @@ paths:
         - name: date
           in: query
           required: false
+          description: Trading day (`YYYY-MM-DD`, US/Eastern).
           schema: { type: string, format: date }
         - name: top_n
           in: query
@@ -753,11 +773,13 @@ paths:
         Combines SPY/QQQ/IWM aggregate sentiment with an advance/decline
         ratio (over directional FIR) and per-sector rotation signals. Ideal
         as a single "is the market risk-on or risk-off right now" probe.
+
+        **Cost:** 3 credits per call. Counts toward your key's per-minute [rate limit](https://www.skylit.ai/docs/api-reference/rate-limits-and-retries).
       parameters:
         - name: date
           in: query
           required: false
-          description: Trading date (YYYY-MM-DD). Defaults to today.
+          description: Trading date (`YYYY-MM-DD`, US/Eastern). Defaults to today.
           schema: { type: string, format: date }
         - name: fir_threshold
           in: query
@@ -806,15 +828,37 @@ paths:
         - The replay starts 10 seconds **before** your cursor, because
           trades arrive in roughly, not strictly, timestamp order. Drop any
           `trade_id` you already hold.
-        - It reaches back at most **15 minutes**. Anything older, or a replay
-          that could not be served, arrives as a `gap` event naming the
-          window; fetch it from `/v1/flow/{ticker}`.
+        - It reaches back at most **15 minutes**, with no cap on the number
+          of trades: the full window is replayed, oldest first, as fast as
+          you read it. Live trades follow once it has caught up.
+        - Anything it could not cover arrives as a `gap` event naming the
+          window, and may arrive between replayed trades:
+          - `beyond_lookback`: your cursor is older than 15 minutes.
+          - `replay_limit`: the catch-up took longer than 3 minutes (a
+            reader slower than the tape); the rest was skipped.
+          - `replay_unavailable`: the replay could not be served.
         - Replayed trades carry the same `trade_id` and fields as live ones;
           their percentile-style scores use current baselines.
         - Cancelled prints are not replayed.
 
+        ### Filling a gap in one call
+
+        Send `since=` **and** `until=` to replay just that window, across
+        every ticker your filters allow, and close: the stream sends the
+        trades in `[since, until)`, then `replayed`, then `closed` with
+        reason `window_complete`. Pass a `gap` event's `from_ns` and `to_ns`
+        as they are.
+
+        - A window is at most **15 minutes** long and must start within the
+          last **24 hours**. Older trades are on `/v1/flow/{ticker}`.
+        - `until` must not be in the future. A window ending in the last
+          15 seconds waits until those seconds are complete.
+        - It costs the stream's 1 connect credit; replayed trades are free.
+        - Close the connection on `closed`: a browser `EventSource` would
+          otherwise reconnect and replay the rest of the window again.
+
         `limit` is rejected with `400`: the stream is not a history endpoint.
-        Load a backlog from `/v1/flow/{ticker}` first if you need one.
+        Load an older backlog from `/v1/flow/{ticker}` if you need one.
 
         ### Pricing
 
@@ -839,12 +883,12 @@ paths:
         | Event | Payload | Meaning |
         |---|---|---|
         | `connected` | stream terms | First frame after the stream opens. |
-        | `trade` | trade object | A trade that passed your filters. Flags `sweep_trade`, `multi_leg` and `cross_trade` are always present. The SSE `id:` is the trade's `trade_id`. |
-        | `replayed` | `{"count": N, "from_ns": "...", "to_ns": "..."}` | Resume only. The catch-up is complete; live trades follow. |
-        | `gap` | `{"from_ns": "...", "to_ns": "...", "reason": "..."}` | Resume only. Trades in this window were not replayed: `beyond_lookback`, `replay_limit` or `replay_unavailable`. |
+        | `trade` | trade object | A trade that passed your filters. Flags `sweep_trade`, `multi_leg`, `cross_trade` and `floor_trade` are always present. The SSE `id:` is the trade's `trade_id`. |
+        | `replayed` | `{"count": N, "from_ns": "...", "to_ns": "..."}` | Resume or window only, sent once the catch-up ends (after any `gap`). On a resume, live trades follow. |
+        | `gap` | `{"from_ns": "...", "to_ns": "...", "reason": "..."}` | Resume or window only. Trades in `[from_ns, to_ns)` were not replayed: `beyond_lookback`, `replay_limit` or `replay_unavailable`. Fill it with `since=from_ns&until=to_ns`. |
         | `credits` | `{"remaining": N}` | Emitted each minute after billing. |
         | `lagged` | `{"dropped": N}` | You read slower than the tape; trades were skipped. |
-        | `closed` | `{"reason": "..."}` | Terminal. `insufficient_credits`, `account_suspended`, `credit_check_failed`, or `feed_unavailable`. |
+        | `closed` | `{"reason": "..."}` | Terminal. `window_complete` (a `since`/`until` window was sent), `insufficient_credits`, `account_suspended`, `credit_check_failed`, or `feed_unavailable`. |
         | `reconnect` | `{"reason": "max_duration"}` | Terminal after 1h; reconnect to continue. |
 
         A `:` comment arrives every 30s as a proxy keepalive. Treat a stalled
@@ -875,6 +919,8 @@ paths:
 
         `-N` matters: without it curl buffers the response and the stream
         appears to hang.
+
+        **Cost:** 1 credit to open, then 1 credit per minute the stream stays open. Counts toward your key's per-minute [rate limit](https://www.skylit.ai/docs/api-reference/rate-limits-and-retries).
       parameters:
         - name: Last-Event-ID
           in: header
@@ -891,6 +937,16 @@ paths:
             `trade_id`, a nanosecond timestamp, or an RFC 3339 time. An
             unparseable value is rejected with `400 invalid_cursor`.
           schema: { type: string }
+        - name: until
+          in: query
+          required: false
+          description: |
+            End of a replay window, exclusive, in the same formats as
+            `since`. With a cursor, the stream replays `[since, until)` and
+            closes instead of going live. At most 15 minutes after `since`,
+            starting within the last 24 hours, and not in the future;
+            otherwise `400 invalid_window`.
+          schema: { type: string, example: "1763307045000000000" }
         - name: ticker
           in: query
           required: false
@@ -1112,6 +1168,8 @@ paths:
         moneyness bucket, and Skylit Flow Score / FlowBonus. The summary
         block adds population-level Sweep Dominance Factor (SDF) and
         bullish/bearish counts extrapolated from the full-day total.
+
+        **Cost:** 3 credits per call. Counts toward your key's per-minute [rate limit](https://www.skylit.ai/docs/api-reference/rate-limits-and-retries).
       parameters:
         - $ref: "#/components/parameters/Ticker"
         - name: timeframe
@@ -1169,6 +1227,7 @@ paths:
         - name: date
           in: query
           required: false
+          description: Trading day (`YYYY-MM-DD`, US/Eastern).
           schema: { type: string, format: date }
       responses:
         "200":
@@ -1198,6 +1257,8 @@ paths:
         multi-day). Optional moneyness breakdown, optional time-decay
         weighting, and a comparative trend block contrasting short- vs
         long-horizon sentiment. Reference: PRD Section 8.
+
+        **Cost:** 3 credits per started 30 days of summed window length (`all` = 15 credits). Counts toward your key's per-minute [rate limit](https://www.skylit.ai/docs/api-reference/rate-limits-and-retries).
       parameters:
         - $ref: "#/components/parameters/Ticker"
         - name: timeframes
@@ -1248,6 +1309,7 @@ paths:
         - name: date
           in: query
           required: false
+          description: Trading day (`YYYY-MM-DD`, US/Eastern).
           schema: { type: string, format: date }
       responses:
         "200":
@@ -1277,6 +1339,8 @@ paths:
         and moneyness band. Returns an overall accumulation score (0–100),
         an estimate of the share of volume representing new positions, and
         a one-token signal (`strong_accumulation` → `low_activity`).
+
+        **Cost:** 1 credit per call. Counts toward your key's per-minute [rate limit](https://www.skylit.ai/docs/api-reference/rate-limits-and-retries).
       parameters:
         - $ref: "#/components/parameters/Ticker"
         - name: timeframe
@@ -1301,6 +1365,7 @@ paths:
         - name: date
           in: query
           required: false
+          description: Trading day (`YYYY-MM-DD`, US/Eastern).
           schema: { type: string, format: date }
       responses:
         "200":
@@ -1330,6 +1395,8 @@ paths:
         and trade count. Surfaces detected patterns (e.g. heavy OTM call
         accumulation, ATM concentration, deep-OTM lottery tickets) and a
         directional `signal`/`dominantStrategy` interpretation.
+
+        **Cost:** 1 credit per call. Counts toward your key's per-minute [rate limit](https://www.skylit.ai/docs/api-reference/rate-limits-and-retries).
       parameters:
         - $ref: "#/components/parameters/Ticker"
         - name: timeframe
@@ -1339,6 +1406,7 @@ paths:
         - name: date
           in: query
           required: false
+          description: Trading day (`YYYY-MM-DD`, US/Eastern).
           schema: { type: string, format: date }
         - name: min_premium
           in: query
@@ -1375,6 +1443,8 @@ paths:
         The `trade_id` path parameter accepts three formats: the canonical
         `flow_{hex}_{suffix}` id returned by the flow feed and stream, a bare
         hex timestamp (`188afe42c3a77af2`), or a raw nanosecond integer.
+
+        **Cost:** 1 credit per call. Counts toward your key's per-minute [rate limit](https://www.skylit.ai/docs/api-reference/rate-limits-and-retries).
       parameters:
         - name: trade_id
           in: path
@@ -1412,11 +1482,14 @@ paths:
         `aggressionRatio`), call/put balance, and ATM/OTM concentration.
         Returns a `bias`, `aggression`, and `confidence` interpretation.
         Reference: PRD Sections 12.3 and 14.
+
+        **Cost:** 1 credit per call. Counts toward your key's per-minute [rate limit](https://www.skylit.ai/docs/api-reference/rate-limits-and-retries).
       parameters:
         - $ref: "#/components/parameters/Ticker"
         - name: date
           in: query
           required: false
+          description: Trading day (`YYYY-MM-DD`, US/Eastern).
           schema: { type: string, format: date }
         - name: timeframe
           in: query
@@ -1468,11 +1541,14 @@ paths:
         `askRatio`, `bidRatio`, `midRatio`, `aggressionRatio`, and a
         `bias`/`aggression`/`confidence` interpretation for one specific
         OPRA option symbol.
+
+        **Cost:** 1 credit per call. Counts toward your key's per-minute [rate limit](https://www.skylit.ai/docs/api-reference/rate-limits-and-retries).
       parameters:
         - $ref: "#/components/parameters/OptionSymbol"
         - name: date
           in: query
           required: false
+          description: Trading day (`YYYY-MM-DD`, US/Eastern).
           schema: { type: string, format: date }
         - name: timeframe
           in: query
@@ -1514,11 +1590,14 @@ paths:
         and put-only bull breakdowns so callers can tell whether the
         directional pressure originates from call buying, put selling, or
         both.
+
+        **Cost:** 3 credits per call. Counts toward your key's per-minute [rate limit](https://www.skylit.ai/docs/api-reference/rate-limits-and-retries).
       parameters:
         - $ref: "#/components/parameters/Ticker"
         - name: date
           in: query
           required: false
+          description: Trading day (`YYYY-MM-DD`, US/Eastern).
           schema: { type: string, format: date }
         - name: timeframe
           in: query
@@ -1570,11 +1649,14 @@ paths:
         Maps a contract's trades to bull/bear/neutral buckets using both
         side (bid/ask/mid) and option type, so a bullish put-seller and a
         bullish call-buyer both register as bullish pressure.
+
+        **Cost:** 1 credit per call. Counts toward your key's per-minute [rate limit](https://www.skylit.ai/docs/api-reference/rate-limits-and-retries).
       parameters:
         - $ref: "#/components/parameters/OptionSymbol"
         - name: date
           in: query
           required: false
+          description: Trading day (`YYYY-MM-DD`, US/Eastern).
           schema: { type: string, format: date }
         - name: timeframe
           in: query
@@ -1615,6 +1697,8 @@ paths:
         trailing 20-day baseline at the same time of day, and the top 10
         tickers by total premium. Optionally narrowed to a comma-separated
         ticker filter.
+
+        **Cost:** 3 credits per call. Counts toward your key's per-minute [rate limit](https://www.skylit.ai/docs/api-reference/rate-limits-and-retries).
       parameters:
         - name: tickers
           in: query
@@ -1653,6 +1737,8 @@ paths:
         (call-buying minus call-selling, etc.) and a `manualNcp`/
         `manualNpp` variant with the script-trade exclusion logic
         relaxed for callers that need raw flow.
+
+        **Cost:** 3 credits per started 30 days of `interval`; with `exclude_deep_itm=true`, 3 credits per trading day. Counts toward your key's per-minute [rate limit](https://www.skylit.ai/docs/api-reference/rate-limits-and-retries).
       parameters:
         - name: interval
           in: query
@@ -1678,7 +1764,7 @@ paths:
         - name: date
           in: query
           required: false
-          description: Trading date anchor (`YYYY-MM-DD`). Defaults to today.
+          description: Trading date anchor (`YYYY-MM-DD`, US/Eastern). Defaults to today.
           schema: { type: string, format: date }
         - name: exclude_multi_leg
           in: query
@@ -1720,6 +1806,8 @@ paths:
         Lists every ticker that traded options on the requested date,
         ordered by total premium (descending). Useful as a starting point
         for discovery or for repopulating the universe of tradable tickers.
+
+        **Cost:** 1 credit per call. Counts toward your key's per-minute [rate limit](https://www.skylit.ai/docs/api-reference/rate-limits-and-retries).
       parameters:
         - in: query
           name: limit
@@ -1759,6 +1847,8 @@ paths:
       description: |
         Case-insensitive prefix search over the active-tickers universe
         for the requested date. Use to power autocomplete UIs.
+
+        **Cost:** 1 credit per call. Counts toward your key's per-minute [rate limit](https://www.skylit.ai/docs/api-reference/rate-limits-and-retries).
       parameters:
         - in: query
           name: q
@@ -1794,6 +1884,8 @@ paths:
         Top tickers for a single trading day, with call/put premium and
         volume splits, net premium, and call/put ratio. Sortable by
         `premium`, `volume`, `net_premium`, or `call_put_ratio`.
+
+        **Cost:** 1 credit per call. Counts toward your key's per-minute [rate limit](https://www.skylit.ai/docs/api-reference/rate-limits-and-retries).
       parameters:
         - in: query
           name: limit
@@ -1840,6 +1932,8 @@ paths:
       description: |
         Same shape as `/v1/underlying/top/daily` but rolled up across the
         trailing 5 trading days ending on `date`.
+
+        **Cost:** 1 credit per call. Counts toward your key's per-minute [rate limit](https://www.skylit.ai/docs/api-reference/rate-limits-and-retries).
       parameters:
         - in: query
           name: limit
@@ -1886,6 +1980,8 @@ paths:
       description: |
         Returns a single-day `UnderlyingStats` record per requested ticker.
         Tickers absent from the response had no options activity that day.
+
+        **Cost:** 5 credits per call. Counts toward your key's per-minute [rate limit](https://www.skylit.ai/docs/api-reference/rate-limits-and-retries).
       parameters:
         - in: query
           name: tickers
@@ -1914,6 +2010,8 @@ paths:
       summary: Daily stats for a single underlying
       operationId: getUnderlyingStats
       x-credits: 1
+      description: |
+        **Cost:** 1 credit per call. Counts toward your key's per-minute [rate limit](https://www.skylit.ai/docs/api-reference/rate-limits-and-retries).
       tags: [Underlying]
       parameters:
         - $ref: "#/components/parameters/Ticker"
@@ -1946,6 +2044,8 @@ paths:
         execution split) plus the underlying stock price at each
         boundary. Backed by the same intraday rollup tables that power
         the chart modal in the Skylit UI.
+
+        **Cost:** 3 credits per started 30 days of `interval`. Counts toward your key's per-minute [rate limit](https://www.skylit.ai/docs/api-reference/rate-limits-and-retries).
       parameters:
         - $ref: "#/components/parameters/Ticker"
         - in: query
@@ -2007,6 +2107,8 @@ paths:
         day (`resolution=1d`, the session's last value). Minutes without
         qualifying options activity carry no point. Off-hours and on a
         holiday the latest session is returned.
+
+        **Cost:** 1 credit per call. Counts toward your key's per-minute [rate limit](https://www.skylit.ai/docs/api-reference/rate-limits-and-retries).
       parameters:
         - $ref: "#/components/parameters/Ticker"
         - in: query
@@ -2039,7 +2141,7 @@ paths:
         - in: query
           name: date
           required: false
-          description: Last trading day covered. Defaults to the current or latest session.
+          description: Last trading day covered (`YYYY-MM-DD`, US/Eastern). Defaults to the current or latest session.
           schema: { type: string, format: date, example: "2026-10-29" }
         - in: query
           name: limit
@@ -2075,6 +2177,8 @@ paths:
         the live feed. Supports rich filtering — sweep-only / multi-leg,
         moneyness, premium floor, DTE / strike / expiration windows.
         See `OptionTradeRow` below.
+
+        **Cost:** 5 credits per call. Counts toward your key's per-minute [rate limit](https://www.skylit.ai/docs/api-reference/rate-limits-and-retries).
       parameters:
         - $ref: "#/components/parameters/Ticker"
         - in: query
@@ -2126,6 +2230,7 @@ paths:
           schema: { type: number, format: double }
         - in: query
           name: expiration
+          description: Expiration date (`YYYY-MM-DD`).
           schema: { type: string, format: date }
       responses:
         "200":
@@ -2153,6 +2258,8 @@ paths:
         Strike-level distribution of call/put premium, volume, and OI for
         the requested window, plus chain-wide aggregates and a max-pain
         estimate.
+
+        **Cost:** 3 credits per call. Counts toward your key's per-minute [rate limit](https://www.skylit.ai/docs/api-reference/rate-limits-and-retries).
       parameters:
         - $ref: "#/components/parameters/Ticker"
         - in: query
@@ -2191,6 +2298,8 @@ paths:
       description: |
         For a single strike on the underlying, breaks the requested
         window's premium and volume out by expiration date.
+
+        **Cost:** 1 credit per call. Counts toward your key's per-minute [rate limit](https://www.skylit.ai/docs/api-reference/rate-limits-and-retries).
       parameters:
         - $ref: "#/components/parameters/Ticker"
         - in: path
@@ -2233,6 +2342,8 @@ paths:
       description: |
         Returns each expiration that traded on `date`, with per-expiration
         call/put volume + premium and the unique-contract count.
+
+        **Cost:** 1 credit per call. Counts toward your key's per-minute [rate limit](https://www.skylit.ai/docs/api-reference/rate-limits-and-retries).
       parameters:
         - $ref: "#/components/parameters/Ticker"
         - $ref: "#/components/parameters/DateQuery"
@@ -2262,6 +2373,8 @@ paths:
         Snapshot of the option chain for a single expiration on the
         requested date — call & put volume, premium, OI, last IV, and
         last trade price per strike, plus the underlying price.
+
+        **Cost:** 3 credits per call. Counts toward your key's per-minute [rate limit](https://www.skylit.ai/docs/api-reference/rate-limits-and-retries).
       parameters:
         - $ref: "#/components/parameters/Ticker"
         - in: query
@@ -2300,15 +2413,19 @@ paths:
         Daily aggregates (premium, volume, call/put split, net premium)
         between `startDate` and `endDate` (inclusive), one row per
         trading day with activity.
+
+        **Cost:** 5 credits per call. Counts toward your key's per-minute [rate limit](https://www.skylit.ai/docs/api-reference/rate-limits-and-retries).
       parameters:
         - $ref: "#/components/parameters/Ticker"
         - in: query
           name: start_date
           required: true
+          description: First trading day of the range (`YYYY-MM-DD`, US/Eastern).
           schema: { type: string, format: date, example: "2026-01-02" }
         - in: query
           name: end_date
           required: true
+          description: Last trading day of the range (`YYYY-MM-DD`, US/Eastern).
           schema: { type: string, format: date, example: "2026-01-31" }
       responses:
         "200":
@@ -2336,6 +2453,8 @@ paths:
         Time-bucketed bars with call/put volume + premium and an
         average-volume baseline computed from `avgPeriod` recent days,
         plus aggregate RVOL stats.
+
+        **Cost:** 1 credit per call. Counts toward your key's per-minute [rate limit](https://www.skylit.ai/docs/api-reference/rate-limits-and-retries).
       parameters:
         - $ref: "#/components/parameters/Ticker"
         - in: query
@@ -2398,6 +2517,8 @@ paths:
         sweep vs multi-leg). Sortable by `premium`, `volume`, `oi`, or `iv`.
         Costs 1 credit with a `ticker` filter and 3 without one (the
         market-wide scan).
+
+        **Cost:** 3 credits without `ticker` (a market-wide scan), 1 credit with one. Counts toward your key's per-minute [rate limit](https://www.skylit.ai/docs/api-reference/rate-limits-and-retries).
       parameters:
         - in: query
           name: limit
@@ -2443,6 +2564,7 @@ paths:
           schema: { type: number, format: double }
         - in: query
           name: expiration
+          description: Expiration date (`YYYY-MM-DD`).
           schema: { type: string, format: date }
         - in: query
           name: min_iv
@@ -2493,6 +2615,8 @@ paths:
       description: |
         Same shape as `/v1/contract/top/daily`, rolled up over the
         trailing 5 trading days ending on `date`.
+
+        **Cost:** 1 credit per call. Counts toward your key's per-minute [rate limit](https://www.skylit.ai/docs/api-reference/rate-limits-and-retries).
       parameters:
         - in: query
           name: limit
@@ -2538,6 +2662,7 @@ paths:
           schema: { type: number, format: double }
         - in: query
           name: expiration
+          description: Expiration date (`YYYY-MM-DD`).
           schema: { type: string, format: date }
         - in: query
           name: min_iv
@@ -2591,6 +2716,8 @@ paths:
         volume, OI dynamics, premium, IV, moneyness, sweep / multi-leg,
         and ticker include / exclude lists. Sortable by `rvol`, `volume`,
         `premium`, `vol_oi`, or `oi_change`.
+
+        **Cost:** 3 credits per call. Counts toward your key's per-minute [rate limit](https://www.skylit.ai/docs/api-reference/rate-limits-and-retries).
       parameters:
         - $ref: "#/components/parameters/DiscoveryLimit"
         - in: query
@@ -2626,14 +2753,15 @@ paths:
           schema: { type: number, format: double }
         - in: query
           name: expiration
+          description: Expiration date (`YYYY-MM-DD`).
           schema: { type: string, format: date }
         - in: query
           name: date
           required: false
           description: |
-            Target trading date (`YYYY-MM-DD`). Defaults to the **previous
-            calendar day** (not the current trading date) since baselines
-            need a settled session.
+            Target trading date (`YYYY-MM-DD`, US/Eastern). Defaults to the
+            **previous calendar day** (not the current trading date) since
+            baselines need a settled session.
           schema: { type: string, format: date }
         - in: query
           name: order_by
@@ -2713,6 +2841,8 @@ paths:
         Contracts whose open interest changed by at least
         `min_oi_change` (or `min_oi_change_pct`) on the target date. `direction`
         narrows the result to opening (OI ↑) or closing (OI ↓) flow.
+
+        **Cost:** 3 credits per call. Counts toward your key's per-minute [rate limit](https://www.skylit.ai/docs/api-reference/rate-limits-and-retries).
       parameters:
         - $ref: "#/components/parameters/DiscoveryLimit"
         - in: query
@@ -2743,8 +2873,8 @@ paths:
           name: date
           required: false
           description: |
-            Target trading date (`YYYY-MM-DD`). Defaults to the **previous
-            calendar day** (not the current trading date).
+            Target trading date (`YYYY-MM-DD`, US/Eastern). Defaults to the
+            **previous calendar day** (not the current trading date).
           schema: { type: string, format: date }
         - in: query
           name: order_by
@@ -2792,6 +2922,8 @@ paths:
       description: |
         Returns a single-day `ContractStats` record per requested OPRA
         symbol. Symbols absent from the response had no activity that day.
+
+        **Cost:** 5 credits per call. Counts toward your key's per-minute [rate limit](https://www.skylit.ai/docs/api-reference/rate-limits-and-retries).
       parameters:
         - in: query
           name: symbols
@@ -2822,6 +2954,8 @@ paths:
       summary: Daily stats for a single contract
       operationId: getContractStats
       x-credits: 1
+      description: |
+        **Cost:** 1 credit per call. Counts toward your key's per-minute [rate limit](https://www.skylit.ai/docs/api-reference/rate-limits-and-retries).
       tags: [Contract]
       parameters:
         - $ref: "#/components/parameters/OptionSymbol"
@@ -2852,6 +2986,8 @@ paths:
         Time-bucketed bars for a single contract — granular bid/mid/ask
         execution split, premium and volume per side, daily cumulative
         totals, VWAP, and (when available) IV and 30D average baselines.
+
+        **Cost:** 3 credits per started 30 days of `interval`. Counts toward your key's per-minute [rate limit](https://www.skylit.ai/docs/api-reference/rate-limits-and-retries).
       parameters:
         - $ref: "#/components/parameters/OptionSymbol"
         - in: query
@@ -2912,6 +3048,8 @@ paths:
         `nextCursor` means the window is exhausted. Splitting the time window
         instead re-reads overlapping ranges and gets an `X-Skylit-Hint`
         response header.
+
+        **Cost:** 5 credits per call. Counts toward your key's per-minute [rate limit](https://www.skylit.ai/docs/api-reference/rate-limits-and-retries).
       parameters:
         - $ref: "#/components/parameters/OptionSymbol"
         - in: query
@@ -2969,15 +3107,19 @@ paths:
         Daily aggregates per trading day in `[startDate, endDate]` — total
         premium / volume, OI dynamics, bid/ask execution split, sweep
         and multi-leg shares, VWAP, last price, IV, and trade count.
+
+        **Cost:** 5 credits per call. Counts toward your key's per-minute [rate limit](https://www.skylit.ai/docs/api-reference/rate-limits-and-retries).
       parameters:
         - $ref: "#/components/parameters/OptionSymbol"
         - in: query
           name: start_date
           required: true
+          description: First trading day of the range (`YYYY-MM-DD`, US/Eastern).
           schema: { type: string, format: date }
         - in: query
           name: end_date
           required: true
+          description: Last trading day of the range (`YYYY-MM-DD`, US/Eastern).
           schema: { type: string, format: date }
       responses:
         "200":
@@ -3004,6 +3146,8 @@ paths:
       description: |
         Same shape as `/v1/underlying/{ticker}/rvol` but scoped to a
         single contract.
+
+        **Cost:** 1 credit per call. Counts toward your key's per-minute [rate limit](https://www.skylit.ai/docs/api-reference/rate-limits-and-retries).
       parameters:
         - $ref: "#/components/parameters/OptionSymbol"
         - in: query
@@ -3078,6 +3222,8 @@ paths:
         **Polling.** `after` / `before` bound the trade time exactly (ISO-8601
         or epoch nanoseconds), and set the trade-date range when no `date`
         parameter is given.
+
+        **Cost:** 5 credits per call. Counts toward your key's per-minute [rate limit](https://www.skylit.ai/docs/api-reference/rate-limits-and-retries).
       parameters:
         - name: tickers
           in: query
@@ -3087,17 +3233,17 @@ paths:
         - name: date
           in: query
           required: false
-          description: Single trade date (`YYYY-MM-DD`, ET). Defaults to today (ET).
+          description: Single trade date (`YYYY-MM-DD`, US/Eastern). Defaults to today (ET).
           schema: { type: string, format: date }
         - name: date_start
           in: query
           required: false
-          description: Inclusive start of a trade-date range (`YYYY-MM-DD`, ET). Max span 31 days.
+          description: Inclusive start of a trade-date range (`YYYY-MM-DD`, US/Eastern). Max span 31 days.
           schema: { type: string, format: date }
         - name: date_end
           in: query
           required: false
-          description: Inclusive end of a trade-date range (`YYYY-MM-DD`, ET). Max span 31 days.
+          description: Inclusive end of a trade-date range (`YYYY-MM-DD`, US/Eastern). Max span 31 days.
           schema: { type: string, format: date }
         - name: time_start
           in: query
@@ -3227,6 +3373,8 @@ paths:
         The top-N largest individual off-exchange prints for `{ticker}` over a
         trailing window, ordered by notional descending. Each row is a single
         TRF print (not an aggregate), useful as a support/resistance anchor.
+
+        **Cost:** 3 credits per call. Counts toward your key's per-minute [rate limit](https://www.skylit.ai/docs/api-reference/rate-limits-and-retries).
       parameters:
         - $ref: "#/components/parameters/Ticker"
         - name: top_n
@@ -3243,8 +3391,9 @@ paths:
           in: query
           required: false
           description: |
-            Optional anchor date (`YYYY-MM-DD`); the window becomes
-            `[as_of_date - lookback_days, as_of_date]`. Omit for a today-anchored window.
+            Optional anchor date (`YYYY-MM-DD`, US/Eastern); the window
+            becomes `[as_of_date - lookback_days, as_of_date]`. Omit for a
+            today-anchored window.
           schema: { type: string, format: date }
       responses:
         "200":
@@ -3275,17 +3424,19 @@ paths:
         the last 30 calendar days and a bucket near 0.1% of the latest price.
         Finished days are cached; today's prints refresh within about 90
         seconds. `mode=peaks` keeps one level per cluster of adjacent buckets.
+
+        **Cost:** 3 credits per call. Counts toward your key's per-minute [rate limit](https://www.skylit.ai/docs/api-reference/rate-limits-and-retries).
       parameters:
         - $ref: "#/components/parameters/Ticker"
         - name: date_start
           in: query
           required: false
-          description: Inclusive start date (`YYYY-MM-DD`). Replaces `lookback_days`. Max span 180 days.
+          description: Inclusive start date (`YYYY-MM-DD`, US/Eastern). Replaces `lookback_days`. Max span 180 days.
           schema: { type: string, format: date }
         - name: date_end
           in: query
           required: false
-          description: Inclusive end date (`YYYY-MM-DD`). Defaults to today (ET).
+          description: Inclusive end date (`YYYY-MM-DD`, US/Eastern). Defaults to today (ET).
           schema: { type: string, format: date }
         - name: lookback_days
           in: query
@@ -3353,21 +3504,23 @@ paths:
         around 6 PM ET, so today's FINRA fields are `null` until then. If FINRA
         data can't be read the totals are still returned, the FINRA fields are
         `null`, and `meta.warnings` has `FINRA_UNAVAILABLE`.
+
+        **Cost:** 3 credits per call. Counts toward your key's per-minute [rate limit](https://www.skylit.ai/docs/api-reference/rate-limits-and-retries).
       parameters:
         - name: date
           in: query
           required: false
-          description: Single trade date (`YYYY-MM-DD`). Defaults to today (ET).
+          description: Single trade date (`YYYY-MM-DD`, US/Eastern). Defaults to today (ET).
           schema: { type: string, format: date }
         - name: date_start
           in: query
           required: false
-          description: Inclusive start of a range (`YYYY-MM-DD`). Max span 366 days.
+          description: Inclusive start of a range (`YYYY-MM-DD`, US/Eastern). Max span 366 days.
           schema: { type: string, format: date }
         - name: date_end
           in: query
           required: false
-          description: Inclusive end of a range (`YYYY-MM-DD`).
+          description: Inclusive end of a range (`YYYY-MM-DD`, US/Eastern).
           schema: { type: string, format: date }
         - name: tickers
           in: query
@@ -3441,13 +3594,16 @@ paths:
         one settlement date, ranked. Reports settle mid-month and at month end
         and FINRA publishes them about a week later; data starts 2021-10-29.
         Without `settlement_date` it serves the latest report.
+
+        **Cost:** 3 credits per call. Counts toward your key's per-minute [rate limit](https://www.skylit.ai/docs/api-reference/rate-limits-and-retries).
       parameters:
         - name: settlement_date
           in: query
           required: false
           description: |
-            Settlement date (`YYYY-MM-DD`). Any date works: the latest report
-            settled on or before it is served, and `meta.settlementDate` says which.
+            Settlement date (`YYYY-MM-DD`, US/Eastern). Any date works: the
+            latest report settled on or before it is served, and
+            `meta.settlementDate` says which.
           schema: { type: string, format: date }
         - name: tickers
           in: query
@@ -3501,17 +3657,19 @@ paths:
         Every FINRA consolidated short interest report for `{ticker}` settled
         in the window, oldest first. Defaults to the last 365 days; windows up
         to 1830 days (data starts 2021-10-29).
+
+        **Cost:** 1 credit per call. Counts toward your key's per-minute [rate limit](https://www.skylit.ai/docs/api-reference/rate-limits-and-retries).
       parameters:
         - $ref: "#/components/parameters/Ticker"
         - name: date_start
           in: query
           required: false
-          description: Inclusive start (`YYYY-MM-DD`). Replaces `lookback_days`. Max span 1830 days.
+          description: Inclusive start (`YYYY-MM-DD`, US/Eastern). Replaces `lookback_days`. Max span 1830 days.
           schema: { type: string, format: date }
         - name: date_end
           in: query
           required: false
-          description: Inclusive end (`YYYY-MM-DD`). Defaults to today (ET).
+          description: Inclusive end (`YYYY-MM-DD`, US/Eastern). Defaults to today (ET).
           schema: { type: string, format: date }
         - name: lookback_days
           in: query
@@ -3549,17 +3707,19 @@ paths:
         compensation rather than a view. Windows are on the TRANSACTION date;
         defaults to the last 365 days, up to 3660 days (data starts 2003).
         Share classes accept `BRK.B`, `BRK-B` or `BRKB`.
+
+        **Cost:** 1 credit per call. Counts toward your key's per-minute [rate limit](https://www.skylit.ai/docs/api-reference/rate-limits-and-retries).
       parameters:
         - $ref: "#/components/parameters/Ticker"
         - name: date_start
           in: query
           required: false
-          description: Inclusive start on the transaction date (`YYYY-MM-DD`). Defaults to 365 days before `date_end`.
+          description: Inclusive start on the transaction date (`YYYY-MM-DD`, US/Eastern). Defaults to 365 days before `date_end`.
           schema: { type: string, format: date }
         - name: date_end
           in: query
           required: false
-          description: Inclusive end (`YYYY-MM-DD`). Defaults to today (ET).
+          description: Inclusive end (`YYYY-MM-DD`, US/Eastern). Defaults to today (ET).
           schema: { type: string, format: date }
         - name: action
           in: query
@@ -3601,16 +3761,18 @@ paths:
         first. Defaults to open-market buys and sells over the last 7 days;
         windows are on the FILING date (when the trade became public) and
         span at most 31 days. Page with `offset`.
+
+        **Cost:** 1 credit per call. Counts toward your key's per-minute [rate limit](https://www.skylit.ai/docs/api-reference/rate-limits-and-retries).
       parameters:
         - name: date_start
           in: query
           required: false
-          description: Inclusive start on the filing date (`YYYY-MM-DD`). Defaults to 7 days before `date_end`. Max span 31 days.
+          description: Inclusive start on the filing date (`YYYY-MM-DD`, US/Eastern). Defaults to 7 days before `date_end`. Max span 31 days.
           schema: { type: string, format: date }
         - name: date_end
           in: query
           required: false
-          description: Inclusive end (`YYYY-MM-DD`). Defaults to today (ET).
+          description: Inclusive end (`YYYY-MM-DD`, US/Eastern). Defaults to today (ET).
           schema: { type: string, format: date }
         - name: tickers
           in: query
@@ -3669,16 +3831,18 @@ paths:
         filing date, default the last 30 days, and span at most 92 days.
         `meta.totalNames` is the number of tickers meeting the filter before
         `limit`.
+
+        **Cost:** 3 credits per call. Counts toward your key's per-minute [rate limit](https://www.skylit.ai/docs/api-reference/rate-limits-and-retries).
       parameters:
         - name: date_start
           in: query
           required: false
-          description: Inclusive start on the filing date (`YYYY-MM-DD`). Defaults to 30 days before `date_end`. Max span 92 days.
+          description: Inclusive start on the filing date (`YYYY-MM-DD`, US/Eastern). Defaults to 30 days before `date_end`. Max span 92 days.
           schema: { type: string, format: date }
         - name: date_end
           in: query
           required: false
-          description: Inclusive end (`YYYY-MM-DD`). Defaults to today (ET).
+          description: Inclusive end (`YYYY-MM-DD`, US/Eastern). Defaults to today (ET).
           schema: { type: string, format: date }
         - name: side
           in: query
@@ -3730,17 +3894,19 @@ paths:
         the filed brackets, so the summary carries the sum of bracket floors
         and ceilings per side and no net. Windows are on the DISCLOSURE date;
         defaults to the last 730 days (data starts August 2024).
+
+        **Cost:** 1 credit per call. Counts toward your key's per-minute [rate limit](https://www.skylit.ai/docs/api-reference/rate-limits-and-retries).
       parameters:
         - $ref: "#/components/parameters/Ticker"
         - name: date_start
           in: query
           required: false
-          description: Inclusive start on the disclosure date (`YYYY-MM-DD`). Defaults to 730 days before `date_end`.
+          description: Inclusive start on the disclosure date (`YYYY-MM-DD`, US/Eastern). Defaults to 730 days before `date_end`.
           schema: { type: string, format: date }
         - name: date_end
           in: query
           required: false
-          description: Inclusive end (`YYYY-MM-DD`). Defaults to today (ET).
+          description: Inclusive end (`YYYY-MM-DD`, US/Eastern). Defaults to today (ET).
           schema: { type: string, format: date }
         - name: limit
           in: query
@@ -3777,16 +3943,18 @@ paths:
         Defaults to the last 30 days; windows span at most 366 days. Filings
         whose asset could not be matched to a ticker (bonds, private funds)
         are not included.
+
+        **Cost:** 1 credit per call. Counts toward your key's per-minute [rate limit](https://www.skylit.ai/docs/api-reference/rate-limits-and-retries).
       parameters:
         - name: date_start
           in: query
           required: false
-          description: Inclusive start on the disclosure date (`YYYY-MM-DD`). Defaults to 30 days before `date_end`. Max span 366 days.
+          description: Inclusive start on the disclosure date (`YYYY-MM-DD`, US/Eastern). Defaults to 30 days before `date_end`. Max span 366 days.
           schema: { type: string, format: date }
         - name: date_end
           in: query
           required: false
-          description: Inclusive end (`YYYY-MM-DD`). Defaults to today (ET).
+          description: Inclusive end (`YYYY-MM-DD`, US/Eastern). Defaults to today (ET).
           schema: { type: string, format: date }
         - name: tickers
           in: query
@@ -3847,16 +4015,18 @@ paths:
         the disclosure date, default the last 30 days, and span at most 366
         days. `meta.totalNames` is the number of tickers meeting the filter
         before `limit`.
+
+        **Cost:** 3 credits per call. Counts toward your key's per-minute [rate limit](https://www.skylit.ai/docs/api-reference/rate-limits-and-retries).
       parameters:
         - name: date_start
           in: query
           required: false
-          description: Inclusive start on the disclosure date (`YYYY-MM-DD`). Defaults to 30 days before `date_end`. Max span 366 days.
+          description: Inclusive start on the disclosure date (`YYYY-MM-DD`, US/Eastern). Defaults to 30 days before `date_end`. Max span 366 days.
           schema: { type: string, format: date }
         - name: date_end
           in: query
           required: false
-          description: Inclusive end (`YYYY-MM-DD`). Defaults to today (ET).
+          description: Inclusive end (`YYYY-MM-DD`, US/Eastern). Defaults to today (ET).
           schema: { type: string, format: date }
         - name: side
           in: query
@@ -3898,17 +4068,19 @@ paths:
         later that has not reported yet. Defaults to all history through 400
         days ahead. A report whose date was moved appears once, on its
         current date. Share classes accept `BRK.B`, `BRK-B` or `BRKB`.
+
+        **Cost:** 1 credit per call. Counts toward your key's per-minute [rate limit](https://www.skylit.ai/docs/api-reference/rate-limits-and-retries).
       parameters:
         - $ref: "#/components/parameters/Ticker"
         - name: date_start
           in: query
           required: false
-          description: Inclusive start on the report date (`YYYY-MM-DD`). Defaults to all history.
+          description: Inclusive start on the report date (`YYYY-MM-DD`, US/Eastern). Defaults to all history.
           schema: { type: string, format: date }
         - name: date_end
           in: query
           required: false
-          description: Inclusive end (`YYYY-MM-DD`). Defaults to 400 days after today (ET).
+          description: Inclusive end (`YYYY-MM-DD`, US/Eastern). Defaults to 400 days after today (ET).
           schema: { type: string, format: date }
         - name: limit
           in: query
@@ -3945,16 +4117,18 @@ paths:
         ahead of after-close ones each day. Use `covered_only=true` to drop
         names without an analyst estimate (mostly micro-caps whose date is a
         placeholder). Page with `offset`.
+
+        **Cost:** 1 credit per call. Counts toward your key's per-minute [rate limit](https://www.skylit.ai/docs/api-reference/rate-limits-and-retries).
       parameters:
         - name: date_start
           in: query
           required: false
-          description: Inclusive start on the report date (`YYYY-MM-DD`). Defaults to today (ET).
+          description: Inclusive start on the report date (`YYYY-MM-DD`, US/Eastern). Defaults to today (ET).
           schema: { type: string, format: date }
         - name: date_end
           in: query
           required: false
-          description: Inclusive end (`YYYY-MM-DD`). Defaults to 6 days after `date_start`. Max span 31 days.
+          description: Inclusive end (`YYYY-MM-DD`, US/Eastern). Defaults to 6 days after `date_start`. Max span 31 days.
           schema: { type: string, format: date }
         - name: tickers
           in: query
@@ -4009,6 +4183,8 @@ paths:
       summary: This OpenAPI specification, as JSON
       operationId: getOpenAPI
       x-credits: 0
+      description: |
+        **Cost:** free (no credits).
       tags: [Meta]
       security: []
       responses:
@@ -4098,8 +4274,8 @@ components:
       in: query
       required: false
       description: |
-        Trading date the request targets, in `YYYY-MM-DD`. Defaults to the
-        current trading date (the most recent session that has settled
+        Trading date the request targets, in `YYYY-MM-DD` (US/Eastern). Defaults
+        to the current trading date (the most recent session that has settled
         enough data to be queryable). Past dates fall through to the daily
         rollup tables.
       schema:
