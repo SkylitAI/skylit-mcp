@@ -397,7 +397,7 @@ paths:
         - name: from
           in: query
           required: true
-          description: RFC3339 start of the window (inclusive). Up to 365 days back.
+          description: RFC3339 start of the window (inclusive). Not before 2023-03-28.
           schema: { type: string, format: date-time }
         - name: to
           in: query
